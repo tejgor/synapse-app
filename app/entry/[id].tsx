@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,18 @@ import { useLocalSearchParams } from 'expo-router';
 import { colors, spacing, borderRadius } from '@/src/constants/theme';
 import { AudioPlayer } from '@/src/components/AudioPlayer';
 import { TopicTag } from '@/src/components/TopicTag';
+import { HighlightCard } from '@/src/components/HighlightCard';
+import { YouTubePlayerComponent, type YouTubePlayerHandle } from '@/src/components/YouTubePlayer';
+import { extractYouTubeVideoId } from '@/src/services/thumbnail';
 import { getEntryById } from '@/src/db/entries';
-import type { Entry } from '@/src/types';
+import type { Entry, TimestampedHighlight } from '@/src/types';
 
 export default function DetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [entry, setEntry] = useState<Entry | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeHighlightIndex, setActiveHighlightIndex] = useState<number | null>(null);
+  const playerRef = useRef<YouTubePlayerHandle>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -26,6 +31,11 @@ export default function DetailScreen() {
       .then(setEntry)
       .finally(() => setLoading(false));
   }, [id]);
+
+  const handleHighlightPress = useCallback((highlight: TimestampedHighlight, index: number) => {
+    setActiveHighlightIndex(index);
+    playerRef.current?.seekTo(highlight.timestamp);
+  }, []);
 
   if (loading) {
     return (
@@ -46,8 +56,13 @@ export default function DetailScreen() {
   const keyLearnings: string[] = entry.key_learnings
     ? JSON.parse(entry.key_learnings)
     : [];
+  const highlights: TimestampedHighlight[] = entry.highlights
+    ? JSON.parse(entry.highlights)
+    : [];
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
+  const isYouTube = entry.source_platform === 'youtube';
+  const videoId = isYouTube ? extractYouTubeVideoId(entry.video_url) : null;
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
@@ -55,35 +70,68 @@ export default function DetailScreen() {
     year: 'numeric',
   });
 
+  const platformLabel =
+    entry.source_platform === 'tiktok'
+      ? 'TikTok'
+      : entry.source_platform === 'instagram'
+        ? 'Instagram Reels'
+        : 'YouTube';
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Header */}
       <View style={styles.header}>
         {entry.topic_tag && <TopicTag tag={entry.topic_tag} />}
         <Text style={styles.date}>{date}</Text>
-        <Text style={styles.platform}>
-          {entry.source_platform === 'tiktok' ? 'TikTok' : 'Instagram Reels'}
-        </Text>
+        <Text style={styles.platform}>{platformLabel}</Text>
       </View>
 
       {/* Processing banner */}
       {isProcessing && (
         <View style={styles.processingBanner}>
           <ActivityIndicator size="small" color={colors.accent} />
-          <Text style={styles.processingText}>Processing your capture...</Text>
+          <Text style={styles.processingText}>
+            {isYouTube ? 'Extracting highlights...' : 'Processing your capture...'}
+          </Text>
         </View>
       )}
 
       {entry.processing_status === 'failed' && (
         <View style={[styles.processingBanner, styles.failedBanner]}>
           <Text style={styles.failedText}>
-            Processing failed. Your voice note is still saved.
+            {isYouTube
+              ? 'Failed to extract highlights. Try again later.'
+              : 'Processing failed. Your voice note is still saved.'}
           </Text>
         </View>
       )}
 
-      {/* Key Learnings */}
-      {keyLearnings.length > 0 && (
+      {/* YouTube: Embedded player + Highlights */}
+      {isYouTube && videoId && (
+        <YouTubePlayerComponent ref={playerRef} videoId={videoId} />
+      )}
+
+      {isYouTube && highlights.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Key Highlights ({highlights.length})
+          </Text>
+          <View style={styles.highlightsList}>
+            {highlights.map((highlight, index) => (
+              <HighlightCard
+                key={index}
+                highlight={highlight}
+                index={index}
+                isActive={activeHighlightIndex === index}
+                onPress={() => handleHighlightPress(highlight, index)}
+              />
+            ))}
+          </View>
+        </View>
+      )}
+
+      {/* TikTok/Instagram: Key Learnings */}
+      {!isYouTube && keyLearnings.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Key Learnings</Text>
           <View style={styles.learningsCard}>
@@ -133,7 +181,7 @@ export default function DetailScreen() {
         onPress={() => Linking.openURL(entry.video_url)}
       >
         <Text style={styles.openButtonText}>
-          Open in {entry.source_platform === 'tiktok' ? 'TikTok' : 'Instagram'}
+          Open in {platformLabel}
         </Text>
       </Pressable>
     </ScrollView>
@@ -202,6 +250,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  highlightsList: {
+    gap: spacing.sm + 4,
   },
   learningsCard: {
     backgroundColor: colors.card,

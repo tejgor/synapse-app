@@ -5,8 +5,8 @@ export async function createEntry(entry: Omit<Entry, 'processed_at'>): Promise<v
   const db = await getDatabase();
   await db.runAsync(
     `INSERT INTO entries (id, source_platform, video_url, thumbnail_url, voice_note_path,
-      voice_note_transcript, video_transcript, key_learnings, topic_tag, processing_status, created_at, processed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      voice_note_transcript, video_transcript, key_learnings, highlights, topic_tag, processing_status, created_at, processed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     entry.id,
     entry.source_platform,
     entry.video_url,
@@ -15,6 +15,7 @@ export async function createEntry(entry: Omit<Entry, 'processed_at'>): Promise<v
     entry.voice_note_transcript,
     entry.video_transcript,
     entry.key_learnings,
+    entry.highlights ?? null,
     entry.topic_tag,
     entry.processing_status,
     entry.created_at,
@@ -57,7 +58,7 @@ export async function getEntryById(id: string): Promise<Entry | null> {
 
 export async function updateEntry(
   id: string,
-  fields: Partial<Pick<Entry, 'voice_note_transcript' | 'video_transcript' | 'key_learnings' | 'topic_tag' | 'processing_status' | 'processed_at' | 'thumbnail_url'>>
+  fields: Partial<Pick<Entry, 'voice_note_transcript' | 'video_transcript' | 'key_learnings' | 'highlights' | 'topic_tag' | 'processing_status' | 'processed_at' | 'thumbnail_url'>>
 ): Promise<void> {
   const db = await getDatabase();
   const sets: string[] = [];

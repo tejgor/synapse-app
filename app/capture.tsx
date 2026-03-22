@@ -53,12 +53,14 @@ export default function CaptureScreen() {
     }
   }, [isRecording, startRecording, stopRecording]);
 
+  const isYouTube = platform === 'youtube';
+
   const handleSave = useCallback(async () => {
     if (!url || !platform) {
-      Alert.alert('Missing URL', 'Please enter a TikTok or Instagram Reels URL.');
+      Alert.alert('Missing URL', 'Please enter a valid video URL.');
       return;
     }
-    if (!audioUri) {
+    if (!isYouTube && !audioUri) {
       Alert.alert('No recording', 'Please record a voice note before saving.');
       return;
     }
@@ -71,10 +73,11 @@ export default function CaptureScreen() {
         source_platform: platform,
         video_url: url,
         thumbnail_url: thumbnailUrl,
-        voice_note_path: audioUri,
+        voice_note_path: isYouTube ? null : audioUri,
         voice_note_transcript: null,
         video_transcript: null,
         key_learnings: null,
+        highlights: null,
         topic_tag: null,
         processing_status: 'pending',
         created_at: new Date().toISOString(),
@@ -90,7 +93,7 @@ export default function CaptureScreen() {
     } finally {
       setSaving(false);
     }
-  }, [url, platform, audioUri, thumbnailUrl]);
+  }, [url, platform, isYouTube, audioUri, thumbnailUrl]);
 
   return (
     <KeyboardAvoidingView
@@ -108,7 +111,7 @@ export default function CaptureScreen() {
         ) : (
           <View style={styles.thumbPlaceholder}>
             <Text style={styles.thumbIcon}>
-              {platform === 'tiktok' ? '🎵' : platform === 'instagram' ? '📸' : '🔗'}
+              {platform === 'tiktok' ? '🎵' : platform === 'instagram' ? '📸' : platform === 'youtube' ? '🎬' : '🔗'}
             </Text>
           </View>
         )}
@@ -118,7 +121,7 @@ export default function CaptureScreen() {
       {!params.url && (
         <TextInput
           style={styles.urlInput}
-          placeholder="Paste TikTok or Reels URL..."
+          placeholder="Paste TikTok, Reels, or YouTube URL..."
           placeholderTextColor={colors.placeholder}
           value={url}
           onChangeText={setUrl}
@@ -130,29 +133,39 @@ export default function CaptureScreen() {
       {/* Platform badge */}
       {platform && (
         <Text style={styles.platformBadge}>
-          {platform === 'tiktok' ? 'TikTok' : 'Instagram Reels'}
+          {platform === 'tiktok' ? 'TikTok' : platform === 'instagram' ? 'Instagram Reels' : 'YouTube'}
         </Text>
       )}
 
-      {/* Record button */}
-      <View style={styles.recordSection}>
-        <RecordButton
-          isRecording={isRecording}
-          duration={duration}
-          onPress={handleRecordToggle}
-        />
-        {audioUri && !isRecording && (
-          <Text style={styles.recordedLabel}>Voice note recorded ✓</Text>
-        )}
-      </View>
+      {/* Record button (hidden for YouTube — no voice note needed) */}
+      {!isYouTube && (
+        <View style={styles.recordSection}>
+          <RecordButton
+            isRecording={isRecording}
+            duration={duration}
+            onPress={handleRecordToggle}
+          />
+          {audioUri && !isRecording && (
+            <Text style={styles.recordedLabel}>Voice note recorded ✓</Text>
+          )}
+        </View>
+      )}
+
+      {isYouTube && (
+        <View style={styles.recordSection}>
+          <Text style={styles.youtubeHint}>
+            We'll extract the key highlights with timestamps so you can watch what matters most.
+          </Text>
+        </View>
+      )}
 
       {/* Save button */}
       <Pressable
         onPress={handleSave}
-        disabled={saving || !audioUri || !platform}
+        disabled={saving || (!isYouTube && !audioUri) || !platform}
         style={[
           styles.saveButton,
-          (!audioUri || !platform || saving) && styles.saveButtonDisabled,
+          ((!isYouTube && !audioUri) || !platform || saving) && styles.saveButtonDisabled,
         ]}
       >
         {saving ? (
@@ -218,6 +231,13 @@ const styles = StyleSheet.create({
     color: colors.success,
     fontSize: 14,
     fontWeight: '600',
+  },
+  youtubeHint: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: spacing.lg,
   },
   saveButton: {
     backgroundColor: colors.accent,

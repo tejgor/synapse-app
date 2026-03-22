@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { colors, borderRadius, spacing } from '../constants/theme';
 import { TopicTag } from './TopicTag';
-import type { Entry } from '../types';
+import type { Entry, TimestampedHighlight } from '../types';
 
 interface EntryCardProps {
   entry: Entry;
@@ -14,7 +14,13 @@ export function EntryCard({ entry, onPress, onTagPress }: EntryCardProps) {
   const keyLearnings: string[] = entry.key_learnings
     ? JSON.parse(entry.key_learnings)
     : [];
-  const firstLearning = keyLearnings[0] || null;
+  const highlights: TimestampedHighlight[] = entry.highlights
+    ? JSON.parse(entry.highlights)
+    : [];
+  const isYouTube = entry.source_platform === 'youtube';
+  const previewText = isYouTube
+    ? (highlights[0]?.title || null)
+    : (keyLearnings[0] || null);
   const isProcessing = entry.processing_status === 'processing' || entry.processing_status === 'pending';
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
     month: 'short',
@@ -28,7 +34,7 @@ export function EntryCard({ entry, onPress, onTagPress }: EntryCardProps) {
       ) : (
         <View style={[styles.thumbnail, styles.placeholderThumb]}>
           <Text style={styles.placeholderIcon}>
-            {entry.source_platform === 'tiktok' ? '🎵' : '📸'}
+            {entry.source_platform === 'tiktok' ? '🎵' : entry.source_platform === 'youtube' ? '🎬' : '📸'}
           </Text>
         </View>
       )}
@@ -46,9 +52,9 @@ export function EntryCard({ entry, onPress, onTagPress }: EntryCardProps) {
           <Text style={styles.date}>{date}</Text>
         </View>
 
-        {firstLearning ? (
+        {previewText ? (
           <Text style={styles.preview} numberOfLines={2}>
-            {firstLearning}
+            {previewText}
           </Text>
         ) : isProcessing ? (
           <Text style={styles.processingText}>Processing...</Text>

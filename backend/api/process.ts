@@ -3,6 +3,14 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 interface ProcessRequest {
   videoUrl: string;
   voiceNoteBase64: string;
+  platform?: string;
+}
+
+interface TimestampedHighlight {
+  timestamp: number;
+  endTimestamp: number;
+  title: string;
+  summary: string;
 }
 
 interface ProcessResponse {
@@ -10,6 +18,7 @@ interface ProcessResponse {
   voiceNoteTranscript: string | null;
   keyLearnings: string[];
   topicTag: string;
+  highlights: TimestampedHighlight[] | null;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -17,11 +26,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { videoUrl, voiceNoteBase64 } = req.body as ProcessRequest;
+  const { videoUrl, voiceNoteBase64, platform } = req.body as ProcessRequest;
 
   if (!videoUrl) {
     return res.status(400).json({ error: 'videoUrl is required' });
   }
+
+  const isYouTube = platform === 'youtube' || videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be');
 
   const supadataKey = process.env.SUPADATA_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -29,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // If no API keys are configured, return mock data
   if (!supadataKey && !openaiKey && !anthropicKey) {
-    return res.status(200).json(getMockResponse());
+    return res.status(200).json(isYouTube ? getYouTubeMockResponse() : getMockResponse());
   }
 
   const result: ProcessResponse = {
@@ -37,9 +48,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     voiceNoteTranscript: null,
     keyLearnings: [],
     topicTag: 'general',
+    highlights: null,
   };
 
   // Step 1: Get video transcript via Supadata
+  let timestampedTranscript: { text: string; offset: number }[] | null = null;
+
   if (supadataKey) {
     try {
       const transcriptRes = await fetch(
@@ -51,14 +65,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (transcriptRes.ok) {
         const data = await transcriptRes.json();
         result.videoTranscript = data.transcript || data.text || null;
+
+        // For YouTube, try to get timestamped segments
+        if (isYouTube && data.segments) {
+          timestampedTranscript = data.segments;
+        }
       }
     } catch (err) {
       console.error('Supadata error:', err);
     }
   }
 
-  // Step 2: Transcribe voice note via OpenAI Whisper
-  if (openaiKey && voiceNoteBase64) {
+  // Step 2: Transcribe voice note via OpenAI Whisper (skip for YouTube)
+  if (!isYouTube && openaiKey && voiceNoteBase64) {
     try {
       const audioBuffer = Buffer.from(voiceNoteBase64, 'base64');
       const blob = new Blob([audioBuffer], { type: 'audio/m4a' });
@@ -84,10 +103,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // Step 3: Generate key learnings via Claude Haiku
+  // Step 3: Generate key learnings or highlights via Claude
   if (anthropicKey && (result.videoTranscript || result.voiceNoteTranscript)) {
     try {
-      const prompt = buildPrompt(result.videoTranscript, result.voiceNoteTranscript);
+      const prompt = isYouTube
+        ? buildYouTubePrompt(result.videoTranscript!, timestampedTranscript)
+        : buildPrompt(result.videoTranscript, result.voiceNoteTranscript);
+
       const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -97,7 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 512,
+          max_tokens: isYouTube ? 1024 : 512,
           messages: [{ role: 'user', content: prompt }],
         }),
       });
@@ -106,8 +128,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const data = await claudeRes.json();
         const text = data.content?.[0]?.text || '';
         const parsed = JSON.parse(text);
-        result.keyLearnings = parsed.keyLearnings || [];
-        result.topicTag = parsed.topicTag || 'general';
+
+        if (isYouTube) {
+          result.highlights = parsed.highlights || [];
+          result.topicTag = parsed.topicTag || 'general';
+        } else {
+          result.keyLearnings = parsed.keyLearnings || [];
+          result.topicTag = parsed.topicTag || 'general';
+        }
       }
     } catch (err) {
       console.error('Claude error:', err);
@@ -139,6 +167,84 @@ function buildPrompt(
   return prompt;
 }
 
+function buildYouTubePrompt(
+  transcript: string,
+  segments: { text: string; offset: number }[] | null
+): string {
+  let prompt = '';
+
+  if (segments && segments.length > 0) {
+    prompt += 'Here is the timestamped transcript of a long-form YouTube video:\n\n';
+    for (const seg of segments) {
+      const mins = Math.floor(seg.offset / 60);
+      const secs = seg.offset % 60;
+      prompt += `[${mins}:${String(secs).padStart(2, '0')}] ${seg.text}\n`;
+    }
+  } else {
+    prompt += `Here is the transcript of a long-form YouTube video:\n\n${transcript}\n`;
+  }
+
+  prompt += `\nAnalyze this video and identify 5-10 of the most important and information-dense segments. For each segment, provide:
+- timestamp: the start time in seconds
+- endTimestamp: the end time in seconds (estimate ~30-90 second segments)
+- title: a short, descriptive title for this segment (5-10 words)
+- summary: a 1-2 sentence summary of the key insight or information
+
+Also generate a single topic tag (1-2 words, lowercase) that categorizes this content.
+
+Respond with ONLY valid JSON in this exact format, no other text:
+{"highlights": [{"timestamp": 0, "endTimestamp": 60, "title": "segment title", "summary": "segment summary"}], "topicTag": "topic"}`;
+
+  return prompt;
+}
+
+function getYouTubeMockResponse(): ProcessResponse {
+  return {
+    videoTranscript:
+      'This is a mock transcript of a long-form YouTube video covering productivity systems, deep work strategies, and time management techniques for knowledge workers.',
+    voiceNoteTranscript: null,
+    keyLearnings: [],
+    topicTag: 'productivity',
+    highlights: [
+      {
+        timestamp: 45,
+        endTimestamp: 120,
+        title: 'Why most productivity systems fail',
+        summary:
+          'The creator explains how most productivity systems are designed for compliance, not creativity, and why knowledge workers need a different approach.',
+      },
+      {
+        timestamp: 180,
+        endTimestamp: 270,
+        title: 'The deep work framework',
+        summary:
+          'A practical framework for scheduling deep work blocks that accounts for energy levels and cognitive load throughout the day.',
+      },
+      {
+        timestamp: 340,
+        endTimestamp: 420,
+        title: 'Batching communication effectively',
+        summary:
+          'How to batch emails, messages, and meetings into specific windows to protect focus time without becoming unresponsive.',
+      },
+      {
+        timestamp: 500,
+        endTimestamp: 580,
+        title: 'The two-minute capture rule',
+        summary:
+          'A simple rule: if a task takes less than two minutes, do it now. If not, capture it in your system and schedule it.',
+      },
+      {
+        timestamp: 650,
+        endTimestamp: 740,
+        title: 'Weekly review process',
+        summary:
+          'A step-by-step weekly review process that takes 30 minutes and keeps your entire system running smoothly.',
+      },
+    ],
+  };
+}
+
 function getMockResponse(): ProcessResponse {
   return {
     videoTranscript:
@@ -152,5 +258,6 @@ function getMockResponse(): ProcessResponse {
       'Share what you learn to deepen your understanding',
     ],
     topicTag: 'productivity',
+    highlights: null,
   };
 }

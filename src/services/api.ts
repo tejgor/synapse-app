@@ -1,21 +1,22 @@
-import type { ProcessResponse } from '../types';
+import type { ProcessResponse, SourcePlatform } from '../types';
 
 // Set this to your deployed backend URL, or leave empty to use mock mode
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
 export async function processEntry(
   videoUrl: string,
-  voiceNoteBase64: string
+  voiceNoteBase64: string,
+  platform?: SourcePlatform
 ): Promise<ProcessResponse> {
   // Mock mode when no backend URL is configured
   if (!API_BASE_URL) {
-    return getMockResponse(videoUrl);
+    return getMockResponse(videoUrl, platform);
   }
 
   const response = await fetch(`${API_BASE_URL}/api/process`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoUrl, voiceNoteBase64 }),
+    body: JSON.stringify({ videoUrl, voiceNoteBase64, platform }),
   });
 
   if (!response.ok) {
@@ -25,8 +26,54 @@ export async function processEntry(
   return response.json();
 }
 
-function getMockResponse(videoUrl: string): ProcessResponse {
-  // Simulate processing delay
+function getMockResponse(videoUrl: string, platform?: SourcePlatform): ProcessResponse {
+  if (platform === 'youtube') {
+    return {
+      videoTranscript:
+        'This is a mock transcript of a long-form YouTube video covering productivity systems, deep work strategies, and time management techniques.',
+      voiceNoteTranscript: null,
+      keyLearnings: [],
+      topicTag: 'productivity',
+      highlights: [
+        {
+          timestamp: 45,
+          endTimestamp: 120,
+          title: 'Why most productivity systems fail',
+          summary:
+            'Most productivity systems are designed for compliance, not creativity. Knowledge workers need a different approach.',
+        },
+        {
+          timestamp: 180,
+          endTimestamp: 270,
+          title: 'The deep work framework',
+          summary:
+            'A practical framework for scheduling deep work blocks based on energy levels and cognitive load.',
+        },
+        {
+          timestamp: 340,
+          endTimestamp: 420,
+          title: 'Batching communication effectively',
+          summary:
+            'How to batch emails and meetings into specific windows to protect focus time.',
+        },
+        {
+          timestamp: 500,
+          endTimestamp: 580,
+          title: 'The two-minute capture rule',
+          summary:
+            'If a task takes less than two minutes, do it now. Otherwise, capture it and schedule it.',
+        },
+        {
+          timestamp: 650,
+          endTimestamp: 740,
+          title: 'Weekly review process',
+          summary:
+            'A 30-minute weekly review process that keeps your entire system running smoothly.',
+        },
+      ],
+    };
+  }
+
   return {
     videoTranscript:
       'This is a mock video transcript. The creator discusses key concepts about productivity and personal growth, sharing practical tips that viewers can apply immediately.',
@@ -43,5 +90,6 @@ function getMockResponse(videoUrl: string): ProcessResponse {
       : videoUrl.includes('fit')
         ? 'fitness'
         : 'productivity',
+    highlights: null,
   };
 }
