@@ -1,5 +1,12 @@
 export type ProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
-export type SourcePlatform = 'tiktok' | 'instagram';
+export type SourcePlatform = 'tiktok' | 'instagram' | 'youtube';
+
+export interface TimestampedHighlight {
+  timestamp: number;
+  endTimestamp: number;
+  title: string;
+  summary: string;
+}
 
 export interface Entry {
   id: string;
@@ -10,6 +17,7 @@ export interface Entry {
   voice_note_transcript: string | null;
   video_transcript: string | null;
   key_learnings: string | null; // JSON string array
+  highlights: string | null; // JSON string of TimestampedHighlight[]
   topic_tag: string | null;
   processing_status: ProcessingStatus;
   created_at: string;
@@ -21,4 +29,5 @@ export interface ProcessResponse {
   voiceNoteTranscript: string | null;
   keyLearnings: string[];
   topicTag: string;
+  highlights: TimestampedHighlight[] | null;
 }

@@ -7,12 +7,15 @@ import {
   Pressable,
   StyleSheet,
   RefreshControl,
+  Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { colors, spacing, borderRadius } from '@/src/constants/theme';
 import { EntryCard } from '@/src/components/EntryCard';
 import { TopicTag } from '@/src/components/TopicTag';
 import { useEntries } from '@/src/hooks/useEntries';
+import { deleteEntry } from '@/src/db/entries';
 
 export default function LibraryScreen() {
   const [search, setSearch] = useState('');
@@ -30,43 +33,25 @@ export default function LibraryScreen() {
     setActiveTag((current) => (current === tag ? undefined : tag));
   }, []);
 
+  const handleDelete = useCallback((id: string) => {
+    Alert.alert('Delete entry', 'This can\'t be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteEntry(id);
+          refresh();
+        },
+      },
+    ]);
+  }, [refresh]);
+
   // Collect unique tags for filter bar
   const tags = [...new Set(entries.map((e) => e.topic_tag).filter(Boolean))] as string[];
 
   return (
     <View style={styles.container}>
-      {/* Search bar */}
-      <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search your learnings..."
-          placeholderTextColor={colors.placeholder}
-          value={search}
-          onChangeText={setSearch}
-        />
-      </View>
-
-      {/* Tag filter bar */}
-      {tags.length > 0 && (
-        <View style={styles.tagBar}>
-          <FlatList
-            horizontal
-            data={tags}
-            keyExtractor={(item) => item}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.tagList}
-            renderItem={({ item }) => (
-              <TopicTag
-                tag={item}
-                active={activeTag === item}
-                onPress={() => handleTagPress(item)}
-              />
-            )}
-          />
-        </View>
-      )}
-
-      {/* Entry list */}
       <FlatList
         data={entries}
         keyExtractor={(item) => item.id}
@@ -75,8 +60,43 @@ export default function LibraryScreen() {
             entry={item}
             onPress={() => router.push(`/entry/${item.id}`)}
             onTagPress={handleTagPress}
+            onDelete={() => handleDelete(item.id)}
           />
         )}
+        ListHeaderComponent={
+          <>
+            <View style={styles.searchContainer}>
+              <View style={styles.searchRow}>
+                <Ionicons name="search" size={16} color={colors.placeholder} style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search your learnings..."
+                  placeholderTextColor={colors.placeholder}
+                  value={search}
+                  onChangeText={setSearch}
+                />
+              </View>
+            </View>
+            {tags.length > 0 && (
+              <View style={styles.tagBar}>
+                <FlatList
+                  horizontal
+                  data={tags}
+                  keyExtractor={(item) => item}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.tagList}
+                  renderItem={({ item }) => (
+                    <TopicTag
+                      tag={item}
+                      active={activeTag === item}
+                      onPress={() => handleTagPress(item)}
+                    />
+                  )}
+                />
+              </View>
+            )}
+          </>
+        }
         refreshControl={
           <RefreshControl
             refreshing={loading}
@@ -87,7 +107,7 @@ export default function LibraryScreen() {
         contentContainerStyle={entries.length === 0 ? styles.emptyContainer : styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>📚</Text>
+            <Ionicons name="book" size={56} color={colors.textMuted} style={styles.emptyIcon} />
             <Text style={styles.emptyTitle}>No learnings yet</Text>
             <Text style={styles.emptySubtitle}>
               Share a TikTok or Reels video to start{'\n'}capturing what you learn
@@ -108,7 +128,7 @@ export default function LibraryScreen() {
           style={styles.fab}
           onPress={() => router.push('/capture')}
         >
-          <Text style={styles.fabText}>+</Text>
+          <Ionicons name="add" size={28} color={colors.text} />
         </Pressable>
       )}
     </View>
@@ -122,17 +142,26 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
-  searchInput: {
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.searchBg,
     borderRadius: borderRadius.md,
-    padding: spacing.sm + 4,
-    color: colors.text,
-    fontSize: 15,
     borderWidth: 1,
     borderColor: colors.cardBorder,
+    paddingHorizontal: spacing.sm + 4,
+  },
+  searchIcon: {
+    marginRight: spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: spacing.sm + 4,
+    color: colors.text,
+    fontSize: 15,
   },
   tagBar: {
     paddingBottom: spacing.sm,
@@ -142,7 +171,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   listContent: {
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: 100,
   },
   emptyContainer: {
@@ -155,7 +184,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   emptyIcon: {
-    fontSize: 56,
     marginBottom: spacing.sm,
   },
   emptyTitle: {
@@ -196,11 +224,5 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 12,
     elevation: 8,
-  },
-  fabText: {
-    color: colors.text,
-    fontSize: 28,
-    fontWeight: '400',
-    marginTop: -2,
   },
 });

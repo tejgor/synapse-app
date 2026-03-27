@@ -15,12 +15,20 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
         voice_note_transcript TEXT,
         video_transcript TEXT,
         key_learnings TEXT,
+        highlights TEXT,
         topic_tag TEXT,
         processing_status TEXT DEFAULT 'pending',
         created_at TEXT NOT NULL,
         processed_at TEXT
       );
     `);
+
+    // Migration: add highlights column for existing databases
+    try {
+      await db.execAsync(`ALTER TABLE entries ADD COLUMN highlights TEXT`);
+    } catch {
+      // Column already exists — ignore
+    }
   }
   return db;
 }

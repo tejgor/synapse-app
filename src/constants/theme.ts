@@ -1,9 +1,11 @@
 export const colors = {
-  background: '#0A0A0A',
-  card: '#1A1A1A',
-  cardBorder: '#2A2A2A',
+  background: '#09090F',
+  card: '#13131C',
+  cardElevated: '#1C1C28',
+  cardBorder: '#252535',
   accent: '#6366F1',
   accentLight: '#818CF8',
+  accentGlow: 'rgba(99,102,241,0.15)',
   text: '#FFFFFF',
   textSecondary: '#9CA3AF',
   textMuted: '#6B7280',
@@ -11,7 +13,7 @@ export const colors = {
   success: '#22C55E',
   warning: '#F59E0B',
   recording: '#EF4444',
-  searchBg: '#1F1F1F',
+  searchBg: '#1A1A27',
   placeholder: '#4B5563',
 };
 
@@ -24,8 +26,8 @@ export const spacing = {
 };
 
 export const borderRadius = {
-  sm: 8,
-  md: 12,
-  lg: 16,
+  sm: 10,
+  md: 14,
+  lg: 18,
   full: 9999,
 };
