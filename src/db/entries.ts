@@ -73,6 +73,11 @@ export async function updateEntry(
   await db.runAsync(`UPDATE entries SET ${sets.join(', ')} WHERE id = ?`, ...params);
 }
 
+export async function deleteEntry(id: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM entries WHERE id = ?', id);
+}
+
 export async function getPendingEntries(): Promise<Entry[]> {
   const db = await getDatabase();
   return db.getAllAsync<Entry>(

@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { Audio } from 'expo-av';
+import { useState, useRef, useCallback } from 'react';
+import { useAudioRecorder, RecordingPresets, AudioModule, setAudioModeAsync } from 'expo-audio';
 import { Paths, Directory, File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 
@@ -13,67 +13,49 @@ interface UseRecorderReturn {
 }
 
 export function useRecorder(): UseRecorderReturn {
-  const [isRecording, setIsRecording] = useState(false);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [duration, setDuration] = useState(0);
   const [audioUri, setAudioUri] = useState<string | null>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      if (recordingRef.current) {
-        recordingRef.current.stopAndUnloadAsync().catch(() => {});
-      }
-    };
-  }, []);
-
   const startRecording = useCallback(async () => {
-    const { granted } = await Audio.requestPermissionsAsync();
+    const { granted } = await AudioModule.requestRecordingPermissionsAsync();
     if (!granted) return;
 
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
+    await setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
     });
 
-    const { recording } = await Audio.Recording.createAsync(
-      Audio.RecordingOptionsPresets.HIGH_QUALITY
-    );
+    await recorder.prepareToRecordAsync();
+    recorder.record();
 
-    recordingRef.current = recording;
-    setIsRecording(true);
     setDuration(0);
     setAudioUri(null);
-
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     intervalRef.current = setInterval(() => {
       setDuration((d) => d + 1);
     }, 1000);
-  }, []);
+  }, [recorder]);
 
   const stopRecording = useCallback(async (): Promise<string | null> => {
-    if (!recordingRef.current) return null;
+    if (!recorder.isRecording) return null;
 
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
 
-    setIsRecording(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await recorder.stop();
 
-    await recordingRef.current.stopAndUnloadAsync();
-    const uri = recordingRef.current.getURI();
-    recordingRef.current = null;
-
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
+    await setAudioModeAsync({
+      allowsRecording: false,
     });
 
+    const uri = recorder.uri;
     if (uri) {
-      // Use the new expo-file-system API
       const recordingsDir = new Directory(Paths.document, 'recordings');
       if (!recordingsDir.exists) {
         recordingsDir.create();
@@ -88,12 +70,12 @@ export function useRecorder(): UseRecorderReturn {
     }
 
     return null;
-  }, []);
+  }, [recorder]);
 
   const resetRecording = useCallback(() => {
     setAudioUri(null);
     setDuration(0);
   }, []);
 
-  return { isRecording, duration, audioUri, startRecording, stopRecording, resetRecording };
+  return { isRecording: recorder.isRecording, duration, audioUri, startRecording, stopRecording, resetRecording };
 }

@@ -1,10 +1,13 @@
 import { useEffect } from 'react';
+import { Pressable } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useShareIntentContext, ShareIntentProvider } from 'expo-share-intent';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { getDatabase } from '@/src/db/schema';
 import { retryFailedEntries } from '@/src/services/processing';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { colors } from '@/src/constants/theme';
 
 function ShareIntentHandler() {
@@ -30,6 +33,7 @@ export default function RootLayout() {
   }, []);
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <ShareIntentProvider>
       <ShareIntentHandler />
       <StatusBar style="light" />
@@ -44,7 +48,7 @@ export default function RootLayout() {
       >
         <Stack.Screen
           name="index"
-          options={{ title: 'Synapse', headerLargeTitle: true }}
+          options={{ title: 'Synapse' }}
         />
         <Stack.Screen
           name="capture"
@@ -52,6 +56,11 @@ export default function RootLayout() {
             title: 'Capture',
             presentation: 'modal',
             animation: 'slide_from_bottom',
+            headerLeft: () => (
+              <Pressable onPress={() => router.back()}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </Pressable>
+            ),
           }}
         />
         <Stack.Screen
@@ -60,5 +69,6 @@ export default function RootLayout() {
         />
       </Stack>
     </ShareIntentProvider>
+    </GestureHandlerRootView>
   );
 }

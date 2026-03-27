@@ -1,5 +1,7 @@
-import React from 'react';
-import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useRef } from 'react';
+import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator, Animated } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, borderRadius, spacing } from '../constants/theme';
 import { TopicTag } from './TopicTag';
 import type { Entry, TimestampedHighlight } from '../types';
@@ -7,10 +9,12 @@ import type { Entry, TimestampedHighlight } from '../types';
 interface EntryCardProps {
   entry: Entry;
   onPress: () => void;
+  onDelete?: () => void;
   onTagPress?: (tag: string) => void;
 }
 
-export function EntryCard({ entry, onPress, onTagPress }: EntryCardProps) {
+export function EntryCard({ entry, onPress, onDelete, onTagPress }: EntryCardProps) {
+  const swipeableRef = useRef<Swipeable>(null);
   const keyLearnings: string[] = entry.key_learnings
     ? JSON.parse(entry.key_learnings)
     : [];
@@ -27,42 +31,76 @@ export function EntryCard({ entry, onPress, onTagPress }: EntryCardProps) {
     day: 'numeric',
   });
 
+  const renderRightActions = (
+    _progress: Animated.AnimatedInterpolation<number>,
+    dragX: Animated.AnimatedInterpolation<number>
+  ) => {
+    const scale = dragX.interpolate({
+      inputRange: [-80, 0],
+      outputRange: [1, 0.8],
+      extrapolate: 'clamp',
+    });
+
+    return (
+      <Pressable
+        style={styles.deleteAction}
+        onPress={() => {
+          swipeableRef.current?.close();
+          onDelete?.();
+        }}
+      >
+        <Animated.View style={{ transform: [{ scale }] }}>
+          <Ionicons name="trash-outline" size={22} color={colors.text} />
+        </Animated.View>
+      </Pressable>
+    );
+  };
+
   return (
-    <Pressable onPress={onPress} style={styles.card}>
-      {entry.thumbnail_url ? (
-        <Image source={{ uri: entry.thumbnail_url }} style={styles.thumbnail} />
-      ) : (
-        <View style={[styles.thumbnail, styles.placeholderThumb]}>
-          <Text style={styles.placeholderIcon}>
-            {entry.source_platform === 'tiktok' ? '🎵' : entry.source_platform === 'youtube' ? '🎬' : '📸'}
-          </Text>
-        </View>
-      )}
-
-      <View style={styles.content}>
-        <View style={styles.topRow}>
-          {entry.topic_tag ? (
-            <TopicTag
-              tag={entry.topic_tag}
-              onPress={() => onTagPress?.(entry.topic_tag!)}
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      rightThreshold={40}
+      overshootRight={false}
+    >
+      <Pressable onPress={onPress} style={styles.card}>
+        {entry.thumbnail_url ? (
+          <Image source={{ uri: entry.thumbnail_url }} style={styles.thumbnail} />
+        ) : (
+          <View style={[styles.thumbnail, styles.placeholderThumb]}>
+            <Ionicons
+              name={entry.source_platform === 'tiktok' ? 'musical-notes' : entry.source_platform === 'youtube' ? 'play-circle' : 'camera'}
+              size={28}
+              color={colors.textMuted}
             />
-          ) : isProcessing ? (
-            <ActivityIndicator size="small" color={colors.accent} />
-          ) : null}
-          <Text style={styles.date}>{date}</Text>
-        </View>
+          </View>
+        )}
 
-        {previewText ? (
-          <Text style={styles.preview} numberOfLines={2}>
-            {previewText}
-          </Text>
-        ) : isProcessing ? (
-          <Text style={styles.processingText}>Processing...</Text>
-        ) : entry.processing_status === 'failed' ? (
-          <Text style={styles.failedText}>Processing failed — tap to view</Text>
-        ) : null}
-      </View>
-    </Pressable>
+        <View style={styles.content}>
+          <View style={styles.topRow}>
+            {entry.topic_tag ? (
+              <TopicTag
+                tag={entry.topic_tag}
+                onPress={() => onTagPress?.(entry.topic_tag!)}
+              />
+            ) : isProcessing ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : null}
+            <Text style={styles.date}>{date}</Text>
+          </View>
+
+          {previewText ? (
+            <Text style={styles.preview} numberOfLines={2}>
+              {previewText}
+            </Text>
+          ) : isProcessing ? (
+            <Text style={styles.processingText}>Processing...</Text>
+          ) : entry.processing_status === 'failed' ? (
+            <Text style={styles.failedText}>Processing failed — tap to view</Text>
+          ) : null}
+        </View>
+      </Pressable>
+    </Swipeable>
   );
 }
 
@@ -85,9 +123,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.cardBorder,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  placeholderIcon: {
-    fontSize: 28,
   },
   content: {
     flex: 1,
@@ -116,5 +151,14 @@ const styles = StyleSheet.create({
   failedText: {
     color: colors.error,
     fontSize: 13,
+  },
+  deleteAction: {
+    backgroundColor: colors.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    marginBottom: spacing.sm + 4,
+    borderRadius: borderRadius.lg,
+    marginRight: spacing.md,
   },
 });

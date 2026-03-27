@@ -11,8 +11,9 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, router } from 'expo-router';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'expo-crypto';
 import { colors, spacing, borderRadius } from '@/src/constants/theme';
 import { RecordButton } from '@/src/components/RecordButton';
 import { useRecorder } from '@/src/hooks/useRecorder';
@@ -67,7 +68,7 @@ export default function CaptureScreen() {
 
     setSaving(true);
     try {
-      const id = uuidv4();
+      const id = randomUUID();
       await createEntry({
         id,
         source_platform: platform,
@@ -110,9 +111,11 @@ export default function CaptureScreen() {
           <Image source={{ uri: thumbnailUrl }} style={styles.thumbnail} />
         ) : (
           <View style={styles.thumbPlaceholder}>
-            <Text style={styles.thumbIcon}>
-              {platform === 'tiktok' ? '🎵' : platform === 'instagram' ? '📸' : platform === 'youtube' ? '🎬' : '🔗'}
-            </Text>
+            <Ionicons
+              name={platform === 'tiktok' ? 'musical-notes' : platform === 'instagram' ? 'camera' : platform === 'youtube' ? 'play-circle' : 'link'}
+              size={48}
+              color={colors.textMuted}
+            />
           </View>
         )}
       </View>
@@ -204,9 +207,6 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  thumbIcon: {
-    fontSize: 48,
   },
   urlInput: {
     backgroundColor: colors.searchBg,

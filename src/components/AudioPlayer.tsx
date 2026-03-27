@@ -1,6 +1,7 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useEffect } from 'react';
 import { View, Pressable, Text, StyleSheet } from 'react-native';
-import { Audio } from 'expo-av';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, borderRadius, spacing } from '../constants/theme';
 
 interface AudioPlayerProps {
@@ -8,47 +9,27 @@ interface AudioPlayerProps {
 }
 
 export function AudioPlayer({ uri }: AudioPlayerProps) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const player = useAudioPlayer(uri);
+  const status = useAudioPlayerStatus(player);
 
-  const togglePlayback = useCallback(async () => {
-    if (isPlaying && soundRef.current) {
-      await soundRef.current.pauseAsync();
-      setIsPlaying(false);
-      return;
+  useEffect(() => {
+    if (status.didJustFinish) {
+      player.seekTo(0);
     }
+  }, [status.didJustFinish]);
 
-    if (soundRef.current) {
-      await soundRef.current.playAsync();
-      setIsPlaying(true);
-      return;
+  const togglePlayback = () => {
+    if (status.playing) {
+      player.pause();
+    } else {
+      player.play();
     }
+  };
 
-    const { sound } = await Audio.Sound.createAsync(
-      { uri },
-      { shouldPlay: true },
-      (status) => {
-        if (status.isLoaded) {
-          setPosition(status.positionMillis);
-          setDuration(status.durationMillis ?? 0);
-          if (status.didJustFinish) {
-            setIsPlaying(false);
-            setPosition(0);
-            soundRef.current?.setPositionAsync(0);
-          }
-        }
-      }
-    );
-    soundRef.current = sound;
-    setIsPlaying(true);
-  }, [isPlaying, uri]);
+  const progress = status.duration > 0 ? status.currentTime / status.duration : 0;
 
-  const progress = duration > 0 ? position / duration : 0;
-
-  function formatMs(ms: number): string {
-    const totalSec = Math.floor(ms / 1000);
+  function formatSeconds(sec: number): string {
+    const totalSec = Math.floor(sec);
     const m = Math.floor(totalSec / 60);
     const s = totalSec % 60;
     return `${m}:${s.toString().padStart(2, '0')}`;
@@ -57,15 +38,15 @@ export function AudioPlayer({ uri }: AudioPlayerProps) {
   return (
     <View style={styles.container}>
       <Pressable onPress={togglePlayback} style={styles.playButton}>
-        <Text style={styles.playIcon}>{isPlaying ? '⏸' : '▶️'}</Text>
+        <Ionicons name={status.playing ? 'pause' : 'play'} size={20} color="#FFFFFF" />
       </Pressable>
       <View style={styles.progressContainer}>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
         </View>
         <View style={styles.timeRow}>
-          <Text style={styles.time}>{formatMs(position)}</Text>
-          <Text style={styles.time}>{formatMs(duration)}</Text>
+          <Text style={styles.time}>{formatSeconds(status.currentTime)}</Text>
+          <Text style={styles.time}>{formatSeconds(status.duration)}</Text>
         </View>
       </View>
     </View>
@@ -88,9 +69,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  playIcon: {
-    fontSize: 18,
   },
   progressContainer: {
     flex: 1,

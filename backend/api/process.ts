@@ -38,11 +38,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const openaiKey = process.env.OPENAI_API_KEY;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
-  // If no API keys are configured, return mock data
-  if (!supadataKey && !openaiKey && !anthropicKey) {
-    return res.status(200).json(isYouTube ? getYouTubeMockResponse() : getMockResponse());
-  }
-
   const result: ProcessResponse = {
     videoTranscript: null,
     voiceNoteTranscript: null,
@@ -56,20 +51,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (supadataKey) {
     try {
-      const transcriptRes = await fetch(
-        `https://api.supadata.ai/v1/social/transcript?url=${encodeURIComponent(videoUrl)}`,
-        {
-          headers: { 'x-api-key': supadataKey },
-        }
-      );
+      const endpoint = isYouTube
+        ? `https://api.supadata.ai/v1/youtube/transcript?url=${encodeURIComponent(videoUrl)}`
+        : `https://api.supadata.ai/v1/transcript?url=${encodeURIComponent(videoUrl)}&text=true`;
+
+      const transcriptRes = await fetch(endpoint, {
+        headers: { 'x-api-key': supadataKey },
+      });
+
       if (transcriptRes.ok) {
         const data = await transcriptRes.json();
-        result.videoTranscript = data.transcript || data.text || null;
 
-        // For YouTube, try to get timestamped segments
-        if (isYouTube && data.segments) {
-          timestampedTranscript = data.segments;
+        if (isYouTube && Array.isArray(data.content)) {
+          // content is an array of { text, offset (ms), duration, lang }
+          result.videoTranscript = data.content.map((c: { text: string }) => c.text).join(' ');
+          timestampedTranscript = data.content.map((c: { text: string; offset: number }) => ({
+            text: c.text,
+            offset: Math.round(c.offset / 1000), // ms → seconds
+          }));
+        } else if (typeof data.content === 'string') {
+          result.videoTranscript = data.content;
         }
+      } else {
+        console.error('Supadata error:', transcriptRes.status, await transcriptRes.text());
       }
     } catch (err) {
       console.error('Supadata error:', err);
@@ -126,7 +130,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (claudeRes.ok) {
         const data = await claudeRes.json();
-        const text = data.content?.[0]?.text || '';
+        const raw = data.content?.[0]?.text || '';
+        const text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/,'').trim();
         const parsed = JSON.parse(text);
 
         if (isYouTube) {
@@ -198,66 +203,3 @@ Respond with ONLY valid JSON in this exact format, no other text:
   return prompt;
 }
 
-function getYouTubeMockResponse(): ProcessResponse {
-  return {
-    videoTranscript:
-      'This is a mock transcript of a long-form YouTube video covering productivity systems, deep work strategies, and time management techniques for knowledge workers.',
-    voiceNoteTranscript: null,
-    keyLearnings: [],
-    topicTag: 'productivity',
-    highlights: [
-      {
-        timestamp: 45,
-        endTimestamp: 120,
-        title: 'Why most productivity systems fail',
-        summary:
-          'The creator explains how most productivity systems are designed for compliance, not creativity, and why knowledge workers need a different approach.',
-      },
-      {
-        timestamp: 180,
-        endTimestamp: 270,
-        title: 'The deep work framework',
-        summary:
-          'A practical framework for scheduling deep work blocks that accounts for energy levels and cognitive load throughout the day.',
-      },
-      {
-        timestamp: 340,
-        endTimestamp: 420,
-        title: 'Batching communication effectively',
-        summary:
-          'How to batch emails, messages, and meetings into specific windows to protect focus time without becoming unresponsive.',
-      },
-      {
-        timestamp: 500,
-        endTimestamp: 580,
-        title: 'The two-minute capture rule',
-        summary:
-          'A simple rule: if a task takes less than two minutes, do it now. If not, capture it in your system and schedule it.',
-      },
-      {
-        timestamp: 650,
-        endTimestamp: 740,
-        title: 'Weekly review process',
-        summary:
-          'A step-by-step weekly review process that takes 30 minutes and keeps your entire system running smoothly.',
-      },
-    ],
-  };
-}
-
-function getMockResponse(): ProcessResponse {
-  return {
-    videoTranscript:
-      'This is a mock video transcript. The creator discusses key concepts about productivity and personal growth, sharing practical tips that viewers can apply immediately.',
-    voiceNoteTranscript:
-      'I found this really interesting because it connects to what I was reading about habit formation. The idea of starting small really resonates with me.',
-    keyLearnings: [
-      'Start with small, consistent actions rather than dramatic changes',
-      'Environment design matters more than willpower for building habits',
-      'Track your progress to maintain motivation over time',
-      'Share what you learn to deepen your understanding',
-    ],
-    topicTag: 'productivity',
-    highlights: null,
-  };
-}

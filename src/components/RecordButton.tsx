@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Pressable, View, Text, StyleSheet, Animated } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, borderRadius } from '../constants/theme';
 
 interface RecordButtonProps {
@@ -50,9 +51,7 @@ export function RecordButton({ isRecording, duration, onPress }: RecordButtonPro
           {isRecording ? (
             <View style={styles.stopIcon} />
           ) : (
-            <View style={styles.micIcon}>
-              <Text style={styles.micText}>🎙</Text>
-            </View>
+            <Ionicons name="mic" size={36} color="#FFFFFF" />
           )}
         </Pressable>
       </Animated.View>
@@ -90,13 +89,6 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: borderRadius.sm,
     backgroundColor: '#FFFFFF',
-  },
-  micIcon: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  micText: {
-    fontSize: 36,
   },
   label: {
     color: colors.textSecondary,
