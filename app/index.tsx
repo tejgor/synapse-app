@@ -66,13 +66,16 @@ export default function LibraryScreen() {
         ListHeaderComponent={
           <>
             <View style={styles.searchContainer}>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search your learnings..."
-                placeholderTextColor={colors.placeholder}
-                value={search}
-                onChangeText={setSearch}
-              />
+              <View style={styles.searchRow}>
+                <Ionicons name="search" size={16} color={colors.placeholder} style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search your learnings..."
+                  placeholderTextColor={colors.placeholder}
+                  value={search}
+                  onChangeText={setSearch}
+                />
+              </View>
             </View>
             {tags.length > 0 && (
               <View style={styles.tagBar}>
@@ -139,17 +142,26 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
-  searchInput: {
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.searchBg,
     borderRadius: borderRadius.md,
-    padding: spacing.sm + 4,
-    color: colors.text,
-    fontSize: 15,
     borderWidth: 1,
     borderColor: colors.cardBorder,
+    paddingHorizontal: spacing.sm + 4,
+  },
+  searchIcon: {
+    marginRight: spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: spacing.sm + 4,
+    color: colors.text,
+    fontSize: 15,
   },
   tagBar: {
     paddingBottom: spacing.sm,
@@ -159,7 +171,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   listContent: {
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: 100,
   },
   emptyContainer: {

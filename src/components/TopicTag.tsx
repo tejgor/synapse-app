@@ -21,20 +21,20 @@ export function TopicTag({ tag, onPress, active }: TopicTagProps) {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.accentGlow,
     borderWidth: 1,
-    borderColor: colors.cardBorder,
+    borderColor: 'rgba(99,102,241,0.3)',
     borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm + 4,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
   },
   active: {
     backgroundColor: colors.accent,
     borderColor: colors.accent,
   },
   text: {
-    color: colors.textSecondary,
-    fontSize: 12,
+    color: colors.accentLight,
+    fontSize: 13,
     fontWeight: '600',
   },
   activeText: {

@@ -17,13 +17,14 @@ function formatDuration(seconds: number): string {
 
 export function RecordButton({ isRecording, duration, onPress }: RecordButtonProps) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const ringOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (isRecording) {
       const pulse = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 1.15,
+            toValue: 1.12,
             duration: 800,
             useNativeDriver: true,
           }),
@@ -34,27 +35,55 @@ export function RecordButton({ isRecording, duration, onPress }: RecordButtonPro
           }),
         ])
       );
+      const ringPulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(ringOpacity, {
+            toValue: 0.6,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity, {
+            toValue: 0.15,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+        ])
+      );
       pulse.start();
-      return () => pulse.stop();
+      ringPulse.start();
+      return () => {
+        pulse.stop();
+        ringPulse.stop();
+      };
     } else {
       pulseAnim.setValue(1);
+      ringOpacity.setValue(0);
     }
-  }, [isRecording, pulseAnim]);
+  }, [isRecording, pulseAnim, ringOpacity]);
 
   return (
     <View style={styles.wrapper}>
-      <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-        <Pressable
-          onPress={onPress}
-          style={[styles.button, isRecording && styles.recording]}
-        >
-          {isRecording ? (
-            <View style={styles.stopIcon} />
-          ) : (
-            <Ionicons name="mic" size={36} color="#FFFFFF" />
-          )}
-        </Pressable>
-      </Animated.View>
+      <View style={styles.ringContainer}>
+        <Animated.View
+          style={[
+            styles.outerRing,
+            isRecording && styles.outerRingRecording,
+            { opacity: ringOpacity },
+          ]}
+        />
+        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+          <Pressable
+            onPress={onPress}
+            style={[styles.button, isRecording && styles.recording]}
+          >
+            {isRecording ? (
+              <View style={styles.stopIcon} />
+            ) : (
+              <Ionicons name="mic" size={36} color="#FFFFFF" />
+            )}
+          </Pressable>
+        </Animated.View>
+      </View>
       <Text style={styles.label}>
         {isRecording ? formatDuration(duration) : 'Tap to record'}
       </Text>
@@ -66,6 +95,23 @@ const styles = StyleSheet.create({
   wrapper: {
     alignItems: 'center',
     gap: 16,
+  },
+  ringContainer: {
+    width: 112,
+    height: 112,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  outerRing: {
+    position: 'absolute',
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    borderWidth: 2,
+    borderColor: colors.accent,
+  },
+  outerRingRecording: {
+    borderColor: colors.recording,
   },
   button: {
     width: 88,

@@ -45,10 +45,11 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   activeCard: {
     borderColor: colors.accent,
+    backgroundColor: colors.cardElevated,
   },
   header: {
     flexDirection: 'row',
@@ -56,23 +57,27 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   indexBadge: {
-    width: 24,
-    height: 24,
+    width: 26,
+    height: 26,
     borderRadius: borderRadius.full,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.accentGlow,
+    borderWidth: 1,
+    borderColor: 'rgba(99,102,241,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   indexText: {
-    color: colors.text,
+    color: colors.accentLight,
     fontSize: 12,
     fontWeight: '700',
   },
   timeBadge: {
-    backgroundColor: colors.searchBg,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: borderRadius.sm,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
   },
   timeText: {
     color: colors.accentLight,
@@ -89,6 +94,6 @@ const styles = StyleSheet.create({
   summary: {
     color: colors.textSecondary,
     fontSize: 13,
-    lineHeight: 18,
+    lineHeight: 19,
   },
 });

@@ -17,5 +17,13 @@ export async function processEntry(
     throw new Error(`Processing failed: ${response.status}`);
   }
 
-  return response.json();
+  const text = await response.text();
+  if (!text) {
+    throw new Error('Empty response from server');
+  }
+  try {
+    return JSON.parse(text) as ProcessResponse;
+  } catch {
+    throw new Error(`Invalid JSON response: ${text.slice(0, 200)}`);
+  }
 }

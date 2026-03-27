@@ -38,7 +38,7 @@ export function AudioPlayer({ uri }: AudioPlayerProps) {
   return (
     <View style={styles.container}>
       <Pressable onPress={togglePlayback} style={styles.playButton}>
-        <Ionicons name={status.playing ? 'pause' : 'play'} size={20} color="#FFFFFF" />
+        <Ionicons name={status.playing ? 'pause' : 'play'} size={22} color="#FFFFFF" />
       </Pressable>
       <View style={styles.progressContainer}>
         <View style={styles.progressTrack}>
@@ -61,29 +61,36 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     padding: spacing.md,
     gap: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
   },
   playButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 4,
   },
   progressContainer: {
     flex: 1,
     gap: spacing.xs,
   },
   progressTrack: {
-    height: 4,
+    height: 6,
     backgroundColor: colors.cardBorder,
-    borderRadius: 2,
+    borderRadius: 3,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     backgroundColor: colors.accent,
-    borderRadius: 2,
+    borderRadius: 3,
   },
   timeRow: {
     flexDirection: 'row',

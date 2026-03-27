@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, borderRadius } from '@/src/constants/theme';
 import { AudioPlayer } from '@/src/components/AudioPlayer';
 import { TopicTag } from '@/src/components/TopicTag';
@@ -18,12 +19,25 @@ import { extractYouTubeVideoId } from '@/src/services/thumbnail';
 import { getEntryById } from '@/src/db/entries';
 import type { Entry, TimestampedHighlight } from '@/src/types';
 
+function formatSeconds(sec: number): string {
+  const total = Math.floor(sec);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 export default function DetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [entry, setEntry] = useState<Entry | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeHighlightIndex, setActiveHighlightIndex] = useState<number | null>(null);
   const playerRef = useRef<YouTubePlayerHandle>(null);
+
+  // Supercut state
+  const [supercutMode, setSupercutMode] = useState(false);
+  const [supercutHighlightIndex, setSupercutHighlightIndex] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState<number | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -32,9 +46,25 @@ export default function DetailScreen() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  const handlePlayerReady = useCallback(async () => {
+    const dur = await playerRef.current?.getDuration();
+    if (dur && dur > 0) setVideoDuration(dur);
+  }, []);
+
   const handleHighlightPress = useCallback((highlight: TimestampedHighlight, index: number) => {
     setActiveHighlightIndex(index);
+    if (supercutMode) setSupercutHighlightIndex(index);
     playerRef.current?.seekTo(highlight.timestamp);
+  }, [supercutMode]);
+
+  const toggleSupercut = useCallback(() => {
+    setSupercutMode((prev) => {
+      if (!prev) {
+        setSupercutHighlightIndex(0);
+        setCurrentTime(0);
+      }
+      return !prev;
+    });
   }, []);
 
   if (loading) {
@@ -77,11 +107,40 @@ export default function DetailScreen() {
         ? 'Instagram Reels'
         : 'YouTube';
 
+  // Supercut derived values
+  const totalHighlightDuration = highlights.reduce(
+    (sum, h) => sum + (h.endTimestamp - h.timestamp), 0
+  );
+  const timeSaved = videoDuration && videoDuration > totalHighlightDuration
+    ? videoDuration - totalHighlightDuration
+    : null;
+  const savingsPercent = videoDuration && videoDuration > 0
+    ? Math.round((1 - totalHighlightDuration / videoDuration) * 100)
+    : null;
+
+  // Supercut progress calculation
+  const completedTime = highlights
+    .slice(0, supercutHighlightIndex)
+    .reduce((sum, h) => sum + (h.endTimestamp - h.timestamp), 0);
+  const currentSegment = highlights[supercutHighlightIndex];
+  const currentSegmentElapsed = currentSegment
+    ? Math.max(0, Math.min(currentTime - currentSegment.timestamp, currentSegment.endTimestamp - currentSegment.timestamp))
+    : 0;
+  const supercutElapsed = completedTime + currentSegmentElapsed;
+  const supercutProgress = totalHighlightDuration > 0 ? supercutElapsed / totalHighlightDuration : 0;
+
+  const effectiveActiveIndex = supercutMode ? supercutHighlightIndex : activeHighlightIndex;
+  const canSupercut = highlights.length > 1;
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Header */}
       <View style={styles.header}>
-        {entry.topic_tag && <TopicTag tag={entry.topic_tag} />}
+        {entry.topic_tag && (
+          <View style={styles.tagRow}>
+            <TopicTag tag={entry.topic_tag} />
+          </View>
+        )}
         <Text style={styles.date}>{date}</Text>
         <Text style={styles.platform}>{platformLabel}</Text>
       </View>
@@ -106,23 +165,83 @@ export default function DetailScreen() {
         </View>
       )}
 
-      {/* YouTube: Embedded player + Highlights */}
+      {/* YouTube: Embedded player */}
       {isYouTube && videoId && (
-        <YouTubePlayerComponent ref={playerRef} videoId={videoId} />
+        <YouTubePlayerComponent
+          ref={playerRef}
+          videoId={videoId}
+          supercutMode={supercutMode}
+          highlights={highlights}
+          onHighlightChange={setSupercutHighlightIndex}
+          onCurrentTimeChange={setCurrentTime}
+          onSupercutComplete={() => setSupercutMode(false)}
+          onReady={handlePlayerReady}
+        />
       )}
 
+      {/* YouTube: Highlights section */}
       {isYouTube && highlights.length > 0 && (
         <View style={styles.section}>
+          <View style={styles.divider} />
           <Text style={styles.sectionTitle}>
             Key Highlights ({highlights.length})
           </Text>
+
+          {/* Supercut toggle */}
+          {canSupercut && (
+            <Pressable
+              onPress={toggleSupercut}
+              style={[styles.supercutToggle, supercutMode && styles.supercutToggleActive]}
+            >
+              <View style={styles.supercutLeft}>
+                <Ionicons
+                  name={supercutMode ? 'pause-circle' : 'play-circle'}
+                  size={22}
+                  color={supercutMode ? colors.text : colors.accentLight}
+                />
+                <View>
+                  <Text style={[styles.supercutLabel, supercutMode && styles.supercutLabelActive]}>
+                    Supercut
+                  </Text>
+                  <Text style={styles.supercutSubtitle}>
+                    {supercutMode ? 'Playing condensed version' : 'Skip the filler, just insights'}
+                  </Text>
+                </View>
+              </View>
+              {timeSaved !== null && savingsPercent !== null && savingsPercent > 0 && (
+                <View style={[styles.savingsBadge, supercutMode && styles.savingsBadgeActive]}>
+                  <Text style={[styles.savingsText, supercutMode && styles.savingsTextActive]}>
+                    Saves {formatSeconds(timeSaved)} · {savingsPercent}%
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          )}
+
+          {/* Supercut progress bar */}
+          {supercutMode && (
+            <View style={styles.supercutProgress}>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.min(supercutProgress * 100, 100)}%` }]} />
+              </View>
+              <View style={styles.progressMeta}>
+                <Text style={styles.segmentInfo}>
+                  Segment {supercutHighlightIndex + 1} of {highlights.length}
+                </Text>
+                <Text style={styles.segmentInfo}>
+                  {formatSeconds(supercutElapsed)} / {formatSeconds(totalHighlightDuration)}
+                </Text>
+              </View>
+            </View>
+          )}
+
           <View style={styles.highlightsList}>
             {highlights.map((highlight, index) => (
               <HighlightCard
                 key={index}
                 highlight={highlight}
                 index={index}
-                isActive={activeHighlightIndex === index}
+                isActive={effectiveActiveIndex === index}
                 onPress={() => handleHighlightPress(highlight, index)}
               />
             ))}
@@ -133,6 +252,7 @@ export default function DetailScreen() {
       {/* TikTok/Instagram: Key Learnings */}
       {!isYouTube && keyLearnings.length > 0 && (
         <View style={styles.section}>
+          <View style={styles.divider} />
           <Text style={styles.sectionTitle}>Key Learnings</Text>
           <View style={styles.learningsCard}>
             {keyLearnings.map((learning, index) => (
@@ -148,6 +268,7 @@ export default function DetailScreen() {
       {/* Voice Note */}
       {entry.voice_note_path && (
         <View style={styles.section}>
+          <View style={styles.divider} />
           <Text style={styles.sectionTitle}>Your Voice Note</Text>
           <AudioPlayer uri={entry.voice_note_path} />
         </View>
@@ -156,6 +277,7 @@ export default function DetailScreen() {
       {/* Voice Note Transcript */}
       {entry.voice_note_transcript && (
         <View style={styles.section}>
+          <View style={styles.divider} />
           <Text style={styles.sectionTitle}>What You Said</Text>
           <View style={styles.transcriptCard}>
             <Text style={styles.transcriptText}>
@@ -168,6 +290,7 @@ export default function DetailScreen() {
       {/* Video Transcript */}
       {entry.video_transcript && (
         <View style={styles.section}>
+          <View style={styles.divider} />
           <Text style={styles.sectionTitle}>Video Transcript</Text>
           <View style={styles.transcriptCard}>
             <Text style={styles.transcriptText}>{entry.video_transcript}</Text>
@@ -195,8 +318,8 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: spacing.lg,
-    paddingBottom: 60,
-    gap: spacing.lg,
+    paddingBottom: 80,
+    gap: spacing.xl,
   },
   loadingContainer: {
     flex: 1,
@@ -209,16 +332,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   header: {
-    gap: spacing.xs,
+    gap: spacing.sm,
+  },
+  tagRow: {
+    flexDirection: 'row',
   },
   date: {
     color: colors.textSecondary,
     fontSize: 14,
-    marginTop: spacing.xs,
+    fontWeight: '500',
   },
   platform: {
     color: colors.textMuted,
     fontSize: 12,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.cardBorder,
+    marginBottom: spacing.xs,
   },
   processingBanner: {
     flexDirection: 'row',
@@ -245,20 +376,103 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   sectionTitle: {
-    color: colors.textMuted,
-    fontSize: 12,
+    color: colors.textSecondary,
+    fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.2,
   },
-  highlightsList: {
-    gap: spacing.sm + 4,
-  },
-  learningsCard: {
+  // Supercut toggle
+  supercutToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: colors.card,
     borderRadius: borderRadius.md,
     padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    marginTop: spacing.xs,
+  },
+  supercutToggleActive: {
+    backgroundColor: colors.cardElevated,
+    borderColor: colors.accent,
+  },
+  supercutLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flex: 1,
+  },
+  supercutLabel: {
+    color: colors.accentLight,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  supercutLabelActive: {
+    color: colors.text,
+  },
+  supercutSubtitle: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 1,
+  },
+  savingsBadge: {
+    backgroundColor: colors.accentGlow,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+    borderWidth: 1,
+    borderColor: 'rgba(99,102,241,0.3)',
+    marginLeft: spacing.sm,
+  },
+  savingsBadgeActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  savingsText: {
+    color: colors.accentLight,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  savingsTextActive: {
+    color: colors.text,
+  },
+  // Supercut progress
+  supercutProgress: {
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  progressTrack: {
+    height: 6,
+    backgroundColor: colors.cardBorder,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+    borderRadius: 3,
+  },
+  progressMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  segmentInfo: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+  },
+  // Highlights
+  highlightsList: {
     gap: spacing.sm + 4,
+  },
+  // Learnings
+  learningsCard: {
+    backgroundColor: colors.cardElevated,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    gap: spacing.md,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },

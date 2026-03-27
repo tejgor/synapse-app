@@ -26,6 +26,7 @@ export function EntryCard({ entry, onPress, onDelete, onTagPress }: EntryCardPro
     ? (highlights[0]?.title || null)
     : (keyLearnings[0] || null);
   const isProcessing = entry.processing_status === 'processing' || entry.processing_status === 'pending';
+  const isDone = entry.processing_status === 'done';
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -63,7 +64,12 @@ export function EntryCard({ entry, onPress, onDelete, onTagPress }: EntryCardPro
       rightThreshold={40}
       overshootRight={false}
     >
-      <Pressable onPress={onPress} style={styles.card}>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [styles.card, pressed && { opacity: 0.75 }]}
+      >
+        {isDone && <View style={styles.accentBorder} />}
+
         {entry.thumbnail_url ? (
           <Image source={{ uri: entry.thumbnail_url }} style={styles.thumbnail} />
         ) : (
@@ -113,11 +119,16 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     overflow: 'hidden',
     marginHorizontal: spacing.md,
-    marginBottom: spacing.sm + 4,
+    marginBottom: spacing.md,
+    minHeight: 108,
+  },
+  accentBorder: {
+    width: 3,
+    backgroundColor: colors.accent,
   },
   thumbnail: {
-    width: 80,
-    height: 100,
+    width: 88,
+    alignSelf: 'stretch',
   },
   placeholderThumb: {
     backgroundColor: colors.cardBorder,
@@ -126,8 +137,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: spacing.sm + 4,
+    padding: spacing.md,
     gap: spacing.sm,
+    justifyContent: 'center',
   },
   topRow: {
     flexDirection: 'row',
@@ -136,12 +148,14 @@ const styles = StyleSheet.create({
   },
   date: {
     color: colors.textMuted,
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: '500',
   },
   preview: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
+    color: colors.text,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '500',
   },
   processingText: {
     color: colors.textMuted,
@@ -157,7 +171,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: 80,
-    marginBottom: spacing.sm + 4,
+    marginBottom: spacing.md,
     borderRadius: borderRadius.lg,
     marginRight: spacing.md,
   },

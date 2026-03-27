@@ -47,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   // Step 1: Get video transcript via Supadata
-  let timestampedTranscript: { text: string; offset: number }[] | null = null;
+  let timestampedTranscript: { text: string; offset: number; duration: number }[] | null = null;
 
   if (supadataKey) {
     try {
@@ -60,15 +60,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
 
       if (transcriptRes.ok) {
-        const data = await transcriptRes.json();
+        const data = await transcriptRes.json() as { content: { text: string; offset: number }[] | string };
 
         if (isYouTube && Array.isArray(data.content)) {
           // content is an array of { text, offset (ms), duration, lang }
           result.videoTranscript = data.content.map((c: { text: string }) => c.text).join(' ');
-          timestampedTranscript = data.content.map((c: { text: string; offset: number }) => ({
+          // Use Math.floor (not round) to keep offsets monotonically increasing
+          const rawSegments = data.content.map((c: { text: string; offset: number; duration?: number }) => ({
             text: c.text,
-            offset: Math.round(c.offset / 1000), // ms → seconds
+            offset: Math.floor(c.offset / 1000), // ms → seconds
+            duration: c.duration ? Math.ceil(c.duration / 1000) : 0,
           }));
+          // Deduplicate segments that share the same integer-second offset (merge text)
+          const deduped: { text: string; offset: number; duration: number }[] = [];
+          for (const seg of rawSegments) {
+            if (deduped.length > 0 && deduped[deduped.length - 1].offset === seg.offset) {
+              deduped[deduped.length - 1].text += ' ' + seg.text;
+              deduped[deduped.length - 1].duration = Math.max(deduped[deduped.length - 1].duration, seg.duration);
+            } else {
+              deduped.push({ ...seg });
+            }
+          }
+          timestampedTranscript = deduped;
         } else if (typeof data.content === 'string') {
           result.videoTranscript = data.content;
         }
@@ -99,7 +112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
 
       if (whisperRes.ok) {
-        const data = await whisperRes.json();
+        const data = await whisperRes.json() as { text?: string };
         result.voiceNoteTranscript = data.text || null;
       }
     } catch (err) {
@@ -110,9 +123,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Step 3: Generate key learnings or highlights via Claude
   if (anthropicKey && (result.videoTranscript || result.voiceNoteTranscript)) {
     try {
-      const prompt = isYouTube
-        ? buildYouTubePrompt(result.videoTranscript!, timestampedTranscript)
-        : buildPrompt(result.videoTranscript, result.voiceNoteTranscript);
+      let claudeBody: Record<string, unknown>;
+
+      if (isYouTube) {
+        // Compute video duration from the last segment
+        const lastSeg = timestampedTranscript && timestampedTranscript.length > 0
+          ? timestampedTranscript[timestampedTranscript.length - 1]
+          : null;
+        const videoDurationSeconds = lastSeg ? lastSeg.offset + lastSeg.duration : 0;
+
+        claudeBody = {
+          model: 'claude-opus-4-6',
+          max_tokens: 4096,
+          system: buildYouTubeSystemPrompt(videoDurationSeconds),
+          messages: [{ role: 'user', content: buildYouTubeUserMessage(timestampedTranscript, result.videoTranscript!) }],
+        };
+      } else {
+        claudeBody = {
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 512,
+          messages: [{ role: 'user', content: buildPrompt(result.videoTranscript, result.voiceNoteTranscript) }],
+        };
+      }
 
       const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -121,25 +153,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'x-api-key': anthropicKey,
           'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: isYouTube ? 1024 : 512,
-          messages: [{ role: 'user', content: prompt }],
-        }),
+        body: JSON.stringify(claudeBody),
       });
 
       if (claudeRes.ok) {
-        const data = await claudeRes.json();
-        const raw = data.content?.[0]?.text || '';
-        const text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/,'').trim();
-        const parsed = JSON.parse(text);
+        const data = await claudeRes.json() as { content: { text: string }[]; stop_reason?: string };
 
-        if (isYouTube) {
-          result.highlights = parsed.highlights || [];
-          result.topicTag = parsed.topicTag || 'general';
+        if (data.stop_reason === 'max_tokens') {
+          console.warn('Claude response was truncated (max_tokens reached) — JSON may be incomplete');
+        }
+
+        const raw = data.content?.[0]?.text || '';
+        const parsed = extractJSON(raw);
+
+        if (isYouTube && parsed) {
+          const rawHighlights: TimestampedHighlight[] = (parsed.highlights as TimestampedHighlight[]) || [];
+
+          // Validate and snap timestamps to nearest valid transcript offset
+          const validOffsets = timestampedTranscript
+            ? timestampedTranscript.map((s) => s.offset)
+            : [];
+          const validated = validOffsets.length > 0
+            ? rawHighlights.map((h) => ({
+                ...h,
+                timestamp: snapToNearest(h.timestamp, validOffsets),
+                endTimestamp: snapToNearest(h.endTimestamp, validOffsets),
+              })).filter((h) => {
+                const dur = h.endTimestamp - h.timestamp;
+                return dur >= 5 && dur <= 300;
+              })
+            : rawHighlights;
+
+          // Enforce non-overlapping with minimum gap between segments
+          const MIN_GAP = 5;
+          let lastEnd = -1;
+          result.highlights = validated
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .filter((h) => {
+              if (h.timestamp >= lastEnd + MIN_GAP) {
+                lastEnd = h.endTimestamp;
+                return true;
+              }
+              return false;
+            });
+          result.topicTag = (parsed.topicTag as string) || 'general';
+        } else if (!isYouTube && parsed) {
+          result.keyLearnings = (parsed.keyLearnings as string[]) || [];
+          result.topicTag = (parsed.topicTag as string) || 'general';
         } else {
-          result.keyLearnings = parsed.keyLearnings || [];
-          result.topicTag = parsed.topicTag || 'general';
+          console.error('Claude error: failed to extract JSON from response. Raw (first 500 chars):', raw.slice(0, 500));
         }
       }
     } catch (err) {
@@ -172,34 +234,105 @@ function buildPrompt(
   return prompt;
 }
 
-function buildYouTubePrompt(
-  transcript: string,
-  segments: { text: string; offset: number }[] | null
-): string {
-  let prompt = '';
+function buildYouTubeSystemPrompt(videoDurationSeconds: number): string {
+  const durationNote = videoDurationSeconds > 0
+    ? `The video is ${videoDurationSeconds} seconds long. Aim for the supercut to be 30-50% of that (~${Math.round(videoDurationSeconds * 0.3)}-${Math.round(videoDurationSeconds * 0.4)} seconds total).`
+    : 'Aim for the supercut to be 30-50% of the original video length.';
 
+  const segmentCountNote = videoDurationSeconds > 0 && videoDurationSeconds < 180
+    ? 'For short videos under 3 minutes, 2-4 segments are acceptable.'
+    : 'Prefer 5-12 segments.';
+
+  return `You are a video editor. You will receive a timestamped transcript of a YouTube video. Each line has the format [Xs] text, where X is the timestamp in seconds.
+
+Your task: identify which timestamp ranges contain vital takeaways — core ideas, key facts, actionable insights, important explanations — and produce a JSON supercut that skips all filler (intros, outros, sponsor reads, personal anecdotes, repetition, "like and subscribe" prompts).
+
+RULES:
+1. Every "timestamp" and "endTimestamp" value in your output MUST be a number that appears as a [Xs] marker in the transcript. Do not invent or interpolate timestamps.
+2. "timestamp" is the [Xs] value of the line where valuable content BEGINS.
+3. "endTimestamp" is the [Xs] value of the FIRST line AFTER the valuable content ends (i.e., the line you are cutting to next).
+4. Segments must be in chronological order, non-overlapping, and have skipped content between them — there must be at least one [Xs] line between the end of one segment and the start of the next.
+5. ${durationNote}
+6. ${segmentCountNote} Each segment can be 10-120 seconds long.
+7. Output integers in seconds only. No decimals, no time strings like "1:23".
+
+EXAMPLE:
+Transcript:
+[0s] Hey everyone welcome back to the channel
+[8s] Today I'm covering three strategies for deep focus
+[15s] The first strategy is time blocking
+[42s] Let me tell you a quick story about my dog
+[68s] The second strategy is eliminating distractions
+[95s] Thanks for watching, please subscribe and hit the bell
+
+Output:
+{"highlights":[{"timestamp":8,"endTimestamp":42,"title":"Time blocking for deep focus","summary":"Explains how to divide your day into dedicated focus blocks to protect your most productive hours."},{"timestamp":68,"endTimestamp":95,"title":"Eliminating distractions","summary":"Practical techniques for removing interruptions from your environment during focused work."}],"topicTag":"productivity"}
+
+Note: timestamp values 8, 42, 68, 95 all come directly from the [Xs] markers in the transcript above.
+
+Respond with ONLY the JSON object. No markdown, no code fences, no explanation text before or after.`;
+}
+
+function buildYouTubeUserMessage(
+  segments: { text: string; offset: number; duration: number }[] | null,
+  transcript: string
+): string {
   if (segments && segments.length > 0) {
-    prompt += 'Here is the timestamped transcript of a long-form YouTube video:\n\n';
+    let msg = 'Here is the timestamped transcript:\n\n';
     for (const seg of segments) {
-      const mins = Math.floor(seg.offset / 60);
-      const secs = seg.offset % 60;
-      prompt += `[${mins}:${String(secs).padStart(2, '0')}] ${seg.text}\n`;
+      msg += `[${seg.offset}s] ${seg.text}\n`;
     }
-  } else {
-    prompt += `Here is the transcript of a long-form YouTube video:\n\n${transcript}\n`;
+    return msg;
+  }
+  return `Here is the transcript (no timestamps available):\n\n${transcript}`;
+}
+
+function extractJSON(raw: string): Record<string, unknown> | null {
+  // Strip markdown code fences
+  const text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+  // Try direct parse first
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    // Fall through to extraction strategies
   }
 
-  prompt += `\nAnalyze this video and identify 5-10 of the most important and information-dense segments. For each segment, provide:
-- timestamp: the start time in seconds
-- endTimestamp: the end time in seconds (estimate ~30-90 second segments)
-- title: a short, descriptive title for this segment (5-10 words)
-- summary: a 1-2 sentence summary of the key insight or information
+  // Try to extract first {...} block containing "highlights" or "keyLearnings"
+  const jsonMatch = text.match(/\{[\s\S]*?"(?:highlights|keyLearnings)"[\s\S]*?\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+    } catch {
+      // Fall through
+    }
+  }
 
-Also generate a single topic tag (1-2 words, lowercase) that categorizes this content.
+  // Try first { to last } substring
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(text.slice(firstBrace, lastBrace + 1)) as Record<string, unknown>;
+    } catch {
+      // Fall through
+    }
+  }
 
-Respond with ONLY valid JSON in this exact format, no other text:
-{"highlights": [{"timestamp": 0, "endTimestamp": 60, "title": "segment title", "summary": "segment summary"}], "topicTag": "topic"}`;
+  return null;
+}
 
-  return prompt;
+function snapToNearest(value: number, validOffsets: number[]): number {
+  if (validOffsets.length === 0) return value;
+  let closest = validOffsets[0];
+  let minDist = Math.abs(value - closest);
+  for (const offset of validOffsets) {
+    const dist = Math.abs(value - offset);
+    if (dist < minDist) {
+      minDist = dist;
+      closest = offset;
+    }
+  }
+  return closest;
 }
 
