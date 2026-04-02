@@ -53,7 +53,7 @@ export default function RootLayout() {
         <Stack.Screen
           name="capture"
           options={{
-            title: 'Capture',
+            title: 'Add',
             presentation: 'modal',
             animation: 'slide_from_bottom',
             headerLeft: () => (

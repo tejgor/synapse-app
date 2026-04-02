@@ -19,8 +19,8 @@ import { deleteEntry } from '@/src/db/entries';
 
 export default function LibraryScreen() {
   const [search, setSearch] = useState('');
-  const [activeTag, setActiveTag] = useState<string | undefined>();
-  const { entries, loading, refresh } = useEntries(search || undefined, activeTag);
+  const [activeCategory, setActiveCategory] = useState<string | undefined>();
+  const { entries, loading, refresh } = useEntries(search || undefined, activeCategory);
 
   // Refresh when screen comes into focus
   useFocusEffect(
@@ -29,12 +29,12 @@ export default function LibraryScreen() {
     }, [refresh])
   );
 
-  const handleTagPress = useCallback((tag: string) => {
-    setActiveTag((current) => (current === tag ? undefined : tag));
+  const handleCategoryPress = useCallback((category: string) => {
+    setActiveCategory((current) => (current === category ? undefined : category));
   }, []);
 
   const handleDelete = useCallback((id: string) => {
-    Alert.alert('Delete entry', 'This can\'t be undone.', [
+    Alert.alert('Delete entry', "This can't be undone.", [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -47,8 +47,8 @@ export default function LibraryScreen() {
     ]);
   }, [refresh]);
 
-  // Collect unique tags for filter bar
-  const tags = [...new Set(entries.map((e) => e.topic_tag).filter(Boolean))] as string[];
+  // Collect unique categories for filter bar
+  const categories = [...new Set(entries.map((e) => e.category).filter(Boolean))] as string[];
 
   return (
     <View style={styles.container}>
@@ -59,7 +59,7 @@ export default function LibraryScreen() {
           <EntryCard
             entry={item}
             onPress={() => router.push(`/entry/${item.id}`)}
-            onTagPress={handleTagPress}
+            onCategoryPress={handleCategoryPress}
             onDelete={() => handleDelete(item.id)}
           />
         )}
@@ -70,26 +70,26 @@ export default function LibraryScreen() {
                 <Ionicons name="search" size={16} color={colors.placeholder} style={styles.searchIcon} />
                 <TextInput
                   style={styles.searchInput}
-                  placeholder="Search your learnings..."
+                  placeholder="Search your knowledge..."
                   placeholderTextColor={colors.placeholder}
                   value={search}
                   onChangeText={setSearch}
                 />
               </View>
             </View>
-            {tags.length > 0 && (
+            {categories.length > 0 && (
               <View style={styles.tagBar}>
                 <FlatList
                   horizontal
-                  data={tags}
+                  data={categories}
                   keyExtractor={(item) => item}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.tagList}
                   renderItem={({ item }) => (
                     <TopicTag
                       tag={item}
-                      active={activeTag === item}
-                      onPress={() => handleTagPress(item)}
+                      active={activeCategory === item}
+                      onPress={() => handleCategoryPress(item)}
                     />
                   )}
                 />
@@ -107,22 +107,22 @@ export default function LibraryScreen() {
         contentContainerStyle={entries.length === 0 ? styles.emptyContainer : styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Ionicons name="book" size={56} color={colors.textMuted} style={styles.emptyIcon} />
-            <Text style={styles.emptyTitle}>No learnings yet</Text>
+            <Ionicons name="bulb" size={56} color={colors.textMuted} style={styles.emptyIcon} />
+            <Text style={styles.emptyTitle}>No knowledge yet</Text>
             <Text style={styles.emptySubtitle}>
-              Share a TikTok or Reels video to start{'\n'}capturing what you learn
+              Share a video link to start building{'\n'}your knowledge base
             </Text>
             <Pressable
               style={styles.manualButton}
               onPress={() => router.push('/capture')}
             >
-              <Text style={styles.manualButtonText}>+ Add manually</Text>
+              <Text style={styles.manualButtonText}>+ Add link</Text>
             </Pressable>
           </View>
         }
       />
 
-      {/* FAB for manual capture */}
+      {/* FAB */}
       {entries.length > 0 && (
         <Pressable
           style={styles.fab}

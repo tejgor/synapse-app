@@ -1,32 +1,27 @@
 import React, { useRef } from 'react';
-import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator, Animated } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Animated } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, borderRadius, spacing } from '../constants/theme';
 import { TopicTag } from './TopicTag';
-import type { Entry, TimestampedHighlight } from '../types';
+import type { Entry } from '../types';
 
 interface EntryCardProps {
   entry: Entry;
   onPress: () => void;
   onDelete?: () => void;
-  onTagPress?: (tag: string) => void;
+  onCategoryPress?: (category: string) => void;
 }
 
-export function EntryCard({ entry, onPress, onDelete, onTagPress }: EntryCardProps) {
+export function EntryCard({ entry, onPress, onDelete, onCategoryPress }: EntryCardProps) {
   const swipeableRef = useRef<Swipeable>(null);
-  const keyLearnings: string[] = entry.key_learnings
-    ? JSON.parse(entry.key_learnings)
-    : [];
-  const highlights: TimestampedHighlight[] = entry.highlights
-    ? JSON.parse(entry.highlights)
-    : [];
-  const isYouTube = entry.source_platform === 'youtube';
-  const previewText = isYouTube
-    ? (highlights[0]?.title || null)
-    : (keyLearnings[0] || null);
+
+  const tags: string[] = entry.tags ? JSON.parse(entry.tags) : [];
+  const visibleTags = tags.slice(0, 3);
+  const extraTagCount = tags.length - visibleTags.length;
+
   const isProcessing = entry.processing_status === 'processing' || entry.processing_status === 'pending';
-  const isDone = entry.processing_status === 'done';
+
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -68,43 +63,50 @@ export function EntryCard({ entry, onPress, onDelete, onTagPress }: EntryCardPro
         onPress={onPress}
         style={({ pressed }) => [styles.card, pressed && { opacity: 0.75 }]}
       >
-        {isDone && <View style={styles.accentBorder} />}
-
-        {entry.thumbnail_url ? (
-          <Image source={{ uri: entry.thumbnail_url }} style={styles.thumbnail} />
-        ) : (
-          <View style={[styles.thumbnail, styles.placeholderThumb]}>
-            <Ionicons
-              name={entry.source_platform === 'tiktok' ? 'musical-notes' : entry.source_platform === 'youtube' ? 'play-circle' : 'camera'}
-              size={28}
-              color={colors.textMuted}
+        {/* Top row: category badge + date */}
+        <View style={styles.topRow}>
+          {entry.category ? (
+            <TopicTag
+              tag={entry.category}
+              onPress={() => onCategoryPress?.(entry.category!)}
             />
+          ) : isProcessing ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : (
+            <View />
+          )}
+          <Text style={styles.date}>{date}</Text>
+        </View>
+
+        {/* Title */}
+        {entry.title ? (
+          <Text style={styles.title} numberOfLines={2}>{entry.title}</Text>
+        ) : isProcessing ? (
+          <Text style={styles.processingText}>Extracting knowledge...</Text>
+        ) : entry.processing_status === 'failed' ? (
+          <Text style={styles.failedText}>Processing failed — tap to view</Text>
+        ) : null}
+
+        {/* Summary snippet */}
+        {entry.summary ? (
+          <Text style={styles.summary} numberOfLines={2}>{entry.summary}</Text>
+        ) : null}
+
+        {/* Tags row */}
+        {visibleTags.length > 0 && (
+          <View style={styles.tagsRow}>
+            {visibleTags.map((tag) => (
+              <View key={tag} style={styles.tagPill}>
+                <Text style={styles.tagText}>{tag}</Text>
+              </View>
+            ))}
+            {extraTagCount > 0 && (
+              <View style={styles.tagPill}>
+                <Text style={styles.tagText}>+{extraTagCount}</Text>
+              </View>
+            )}
           </View>
         )}
-
-        <View style={styles.content}>
-          <View style={styles.topRow}>
-            {entry.topic_tag ? (
-              <TopicTag
-                tag={entry.topic_tag}
-                onPress={() => onTagPress?.(entry.topic_tag!)}
-              />
-            ) : isProcessing ? (
-              <ActivityIndicator size="small" color={colors.accent} />
-            ) : null}
-            <Text style={styles.date}>{date}</Text>
-          </View>
-
-          {previewText ? (
-            <Text style={styles.preview} numberOfLines={2}>
-              {previewText}
-            </Text>
-          ) : isProcessing ? (
-            <Text style={styles.processingText}>Processing...</Text>
-          ) : entry.processing_status === 'failed' ? (
-            <Text style={styles.failedText}>Processing failed — tap to view</Text>
-          ) : null}
-        </View>
       </Pressable>
     </Swipeable>
   );
@@ -112,34 +114,14 @@ export function EntryCard({ entry, onPress, onDelete, onTagPress }: EntryCardPro
 
 const styles = StyleSheet.create({
   card: {
-    flexDirection: 'row',
     backgroundColor: colors.card,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    overflow: 'hidden',
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
-    minHeight: 108,
-  },
-  accentBorder: {
-    width: 3,
-    backgroundColor: colors.accent,
-  },
-  thumbnail: {
-    width: 88,
-    alignSelf: 'stretch',
-  },
-  placeholderThumb: {
-    backgroundColor: colors.cardBorder,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  content: {
-    flex: 1,
     padding: spacing.md,
     gap: spacing.sm,
-    justifyContent: 'center',
   },
   topRow: {
     flexDirection: 'row',
@@ -151,10 +133,32 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
   },
-  preview: {
+  title: {
     color: colors.text,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 21,
+  },
+  summary: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  tagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  tagPill: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  tagText: {
+    color: colors.textMuted,
+    fontSize: 11,
     fontWeight: '500',
   },
   processingText: {

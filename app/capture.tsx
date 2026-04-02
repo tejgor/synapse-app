@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  Image,
   TextInput,
   Pressable,
   StyleSheet,
@@ -15,54 +14,36 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, router } from 'expo-router';
 import { randomUUID } from 'expo-crypto';
 import { colors, spacing, borderRadius } from '@/src/constants/theme';
-import { RecordButton } from '@/src/components/RecordButton';
-import { useRecorder } from '@/src/hooks/useRecorder';
-import { detectPlatform, getThumbnail } from '@/src/services/thumbnail';
+import { detectPlatform } from '@/src/services/thumbnail';
 import { createEntry } from '@/src/db/entries';
 import { processEntry } from '@/src/services/processing';
 import type { SourcePlatform } from '@/src/types';
 
+const PLATFORM_LABELS: Record<SourcePlatform, string> = {
+  tiktok: 'TikTok',
+  instagram: 'Instagram Reels',
+  youtube: 'YouTube',
+};
+
+const PLATFORM_ICONS: Record<SourcePlatform, string> = {
+  tiktok: 'musical-notes',
+  instagram: 'camera',
+  youtube: 'play-circle',
+};
+
 export default function CaptureScreen() {
   const params = useLocalSearchParams<{ url?: string }>();
   const [url, setUrl] = useState(params.url || '');
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [platform, setPlatform] = useState<SourcePlatform | null>(null);
-  const [loadingThumb, setLoadingThumb] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const { isRecording, duration, audioUri, startRecording, stopRecording } = useRecorder();
-
-  // Fetch thumbnail when URL changes
   useEffect(() => {
-    if (!url) return;
-    const detected = detectPlatform(url);
-    setPlatform(detected);
-
-    if (detected) {
-      setLoadingThumb(true);
-      getThumbnail(url)
-        .then(setThumbnailUrl)
-        .finally(() => setLoadingThumb(false));
-    }
+    setPlatform(url ? detectPlatform(url) : null);
   }, [url]);
-
-  const handleRecordToggle = useCallback(async () => {
-    if (isRecording) {
-      await stopRecording();
-    } else {
-      await startRecording();
-    }
-  }, [isRecording, startRecording, stopRecording]);
-
-  const isYouTube = platform === 'youtube';
 
   const handleSave = useCallback(async () => {
     if (!url || !platform) {
-      Alert.alert('Missing URL', 'Please enter a valid video URL.');
-      return;
-    }
-    if (!isYouTube && !audioUri) {
-      Alert.alert('No recording', 'Please record a voice note before saving.');
+      Alert.alert('Missing URL', 'Please enter a valid TikTok, Instagram, or YouTube URL.');
       return;
     }
 
@@ -71,15 +52,14 @@ export default function CaptureScreen() {
       const id = randomUUID();
       await createEntry({
         id,
+        title: null,
+        summary: null,
+        category: null,
+        tags: null,
+        key_details: null,
+        source_url: url,
         source_platform: platform,
-        video_url: url,
-        thumbnail_url: thumbnailUrl,
-        voice_note_path: isYouTube ? null : audioUri,
-        voice_note_transcript: null,
         video_transcript: null,
-        key_learnings: null,
-        highlights: null,
-        topic_tag: null,
         processing_status: 'pending',
         created_at: new Date().toISOString(),
       });
@@ -90,91 +70,55 @@ export default function CaptureScreen() {
       router.back();
     } catch (err) {
       console.error('Save failed:', err);
-      Alert.alert('Error', 'Failed to save entry. Please try again.');
+      Alert.alert('Error', 'Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
-  }, [url, platform, isYouTube, audioUri, thumbnailUrl]);
+  }, [url, platform]);
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* Thumbnail preview */}
-      <View style={styles.thumbnailSection}>
-        {loadingThumb ? (
-          <View style={styles.thumbPlaceholder}>
-            <ActivityIndicator color={colors.accent} />
-          </View>
-        ) : thumbnailUrl ? (
-          <Image source={{ uri: thumbnailUrl }} style={styles.thumbnail} />
-        ) : (
-          <View style={styles.thumbPlaceholder}>
-            <Ionicons
-              name={platform === 'tiktok' ? 'musical-notes' : platform === 'instagram' ? 'camera' : platform === 'youtube' ? 'play-circle' : 'link'}
-              size={48}
-              color={colors.textMuted}
-            />
-          </View>
-        )}
-      </View>
+      <View style={styles.body}>
+        {/* Platform icon */}
+        <View style={styles.iconContainer}>
+          <Ionicons
+            name={(platform ? PLATFORM_ICONS[platform] : 'link') as any}
+            size={52}
+            color={platform ? colors.accentLight : colors.textMuted}
+          />
+        </View>
 
-      {/* URL input (for manual testing) */}
-      {!params.url && (
+        {/* URL input */}
         <TextInput
           style={styles.urlInput}
-          placeholder="Paste TikTok, Reels, or YouTube URL..."
+          placeholder="Paste TikTok, Instagram, or YouTube URL..."
           placeholderTextColor={colors.placeholder}
           value={url}
           onChangeText={setUrl}
           autoCapitalize="none"
           autoCorrect={false}
+          autoFocus={!params.url}
         />
-      )}
 
-      {/* Platform badge */}
-      {platform && (
-        <Text style={styles.platformBadge}>
-          {platform === 'tiktok' ? 'TikTok' : platform === 'instagram' ? 'Instagram Reels' : 'YouTube'}
-        </Text>
-      )}
-
-      {/* Record button (hidden for YouTube — no voice note needed) */}
-      {!isYouTube && (
-        <View style={styles.recordSection}>
-          <RecordButton
-            isRecording={isRecording}
-            duration={duration}
-            onPress={handleRecordToggle}
-          />
-          {audioUri && !isRecording && (
-            <Text style={styles.recordedLabel}>Voice note recorded ✓</Text>
-          )}
-        </View>
-      )}
-
-      {isYouTube && (
-        <View style={styles.recordSection}>
-          <Text style={styles.youtubeHint}>
-            We'll extract the key highlights with timestamps so you can watch what matters most.
-          </Text>
-        </View>
-      )}
+        {/* Platform badge */}
+        {platform && (
+          <Text style={styles.platformBadge}>{PLATFORM_LABELS[platform]}</Text>
+        )}
+      </View>
 
       {/* Save button */}
       <Pressable
         onPress={handleSave}
-        disabled={saving || (!isYouTube && !audioUri) || !platform}
-        style={[
-          styles.saveButton,
-          ((!isYouTube && !audioUri) || !platform || saving) && styles.saveButtonDisabled,
-        ]}
+        disabled={saving || !platform}
+        style={[styles.saveButton, (!platform || saving) && styles.saveButtonDisabled]}
       >
         {saving ? (
           <ActivityIndicator color={colors.text} />
         ) : (
-          <Text style={styles.saveText}>Save</Text>
+          <Text style={styles.saveText}>Add to Knowledge Base</Text>
         )}
       </Pressable>
     </KeyboardAvoidingView>
@@ -186,34 +130,25 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    justifyContent: 'space-between',
+    paddingTop: spacing.xl,
     paddingBottom: spacing.xl + 16,
+    justifyContent: 'space-between',
   },
-  thumbnailSection: {
+  body: {
+    flex: 1,
+    gap: spacing.md,
+    alignItems: 'stretch',
+  },
+  iconContainer: {
     alignItems: 'center',
-  },
-  thumbnail: {
-    width: 240,
-    height: 310,
-    borderRadius: borderRadius.lg,
-  },
-  thumbPlaceholder: {
-    width: 240,
-    height: 310,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingVertical: spacing.xl,
   },
   urlInput: {
     backgroundColor: colors.searchBg,
     borderRadius: borderRadius.md,
     padding: spacing.md,
     color: colors.text,
-    fontSize: 14,
+    fontSize: 15,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
@@ -222,22 +157,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     fontWeight: '600',
-  },
-  recordSection: {
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  recordedLabel: {
-    color: colors.success,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  youtubeHint: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: spacing.lg,
   },
   saveButton: {
     backgroundColor: colors.accent,

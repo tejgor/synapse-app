@@ -8,21 +8,21 @@ interface UseEntriesReturn {
   refresh: () => Promise<void>;
 }
 
-export function useEntries(search?: string, tag?: string): UseEntriesReturn {
+export function useEntries(search?: string, category?: string): UseEntriesReturn {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await getEntries(search, tag);
+      const result = await getEntries(search, category);
       setEntries(result);
     } catch (err) {
       console.error('Failed to fetch entries:', err);
     } finally {
       setLoading(false);
     }
-  }, [search, tag]);
+  }, [search, category]);
 
   useEffect(() => {
     refresh();

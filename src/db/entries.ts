@@ -4,26 +4,25 @@ import type { Entry } from '../types';
 export async function createEntry(entry: Omit<Entry, 'processed_at'>): Promise<void> {
   const db = await getDatabase();
   await db.runAsync(
-    `INSERT INTO entries (id, source_platform, video_url, thumbnail_url, voice_note_path,
-      voice_note_transcript, video_transcript, key_learnings, highlights, topic_tag, processing_status, created_at, processed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO entries (id, title, summary, category, tags, key_details, source_url, source_platform,
+      video_transcript, processing_status, created_at, processed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     entry.id,
+    entry.title,
+    entry.summary,
+    entry.category,
+    entry.tags,
+    entry.key_details,
+    entry.source_url,
     entry.source_platform,
-    entry.video_url,
-    entry.thumbnail_url,
-    entry.voice_note_path,
-    entry.voice_note_transcript,
     entry.video_transcript,
-    entry.key_learnings,
-    entry.highlights ?? null,
-    entry.topic_tag,
     entry.processing_status,
     entry.created_at,
     null,
   );
 }
 
-export async function getEntries(search?: string, tag?: string): Promise<Entry[]> {
+export async function getEntries(search?: string, category?: string): Promise<Entry[]> {
   const db = await getDatabase();
   let query = 'SELECT * FROM entries';
   const conditions: string[] = [];
@@ -31,15 +30,15 @@ export async function getEntries(search?: string, tag?: string): Promise<Entry[]
 
   if (search) {
     conditions.push(
-      `(key_learnings LIKE ? OR voice_note_transcript LIKE ? OR topic_tag LIKE ? OR video_transcript LIKE ?)`
+      `(title LIKE ? OR summary LIKE ? OR tags LIKE ? OR key_details LIKE ? OR category LIKE ?)`
     );
     const term = `%${search}%`;
-    params.push(term, term, term, term);
+    params.push(term, term, term, term, term);
   }
 
-  if (tag) {
-    conditions.push('topic_tag = ?');
-    params.push(tag);
+  if (category) {
+    conditions.push('category = ?');
+    params.push(category);
   }
 
   if (conditions.length > 0) {
@@ -58,7 +57,7 @@ export async function getEntryById(id: string): Promise<Entry | null> {
 
 export async function updateEntry(
   id: string,
-  fields: Partial<Pick<Entry, 'voice_note_transcript' | 'video_transcript' | 'key_learnings' | 'highlights' | 'topic_tag' | 'processing_status' | 'processed_at' | 'thumbnail_url'>>
+  fields: Partial<Pick<Entry, 'title' | 'summary' | 'category' | 'tags' | 'key_details' | 'video_transcript' | 'processing_status' | 'processed_at'>>
 ): Promise<void> {
   const db = await getDatabase();
   const sets: string[] = [];
@@ -83,4 +82,12 @@ export async function getPendingEntries(): Promise<Entry[]> {
   return db.getAllAsync<Entry>(
     `SELECT * FROM entries WHERE processing_status IN ('pending', 'failed') ORDER BY created_at ASC`
   );
+}
+
+export async function getCategories(): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ category: string }>(
+    `SELECT category FROM entries WHERE category IS NOT NULL GROUP BY category ORDER BY COUNT(*) DESC`
+  );
+  return rows.map((r) => r.category);
 }
