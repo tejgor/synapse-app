@@ -9,6 +9,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "expo-background-task": "file:./modules/background-task",
     "@expo/vector-icons": "^15.0.2",
     "@react-navigation/native": "^7.1.33",
     "expo": "~55.0.8",

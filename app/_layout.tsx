@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Pressable } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { AppState, Pressable } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useShareIntentContext, ShareIntentProvider } from 'expo-share-intent';
@@ -25,11 +25,23 @@ function ShareIntentHandler() {
 }
 
 export default function RootLayout() {
+  const appState = useRef(AppState.currentState);
+
   useEffect(() => {
     // Initialize database and retry any pending entries on app launch
     getDatabase().then(() => {
       retryFailedEntries();
     });
+
+    // Retry on foreground return — catches entries that didn't finish in the background
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (appState.current.match(/inactive|background/) && nextState === 'active') {
+        retryFailedEntries();
+      }
+      appState.current = nextState;
+    });
+
+    return () => subscription.remove();
   }, []);
 
   return (

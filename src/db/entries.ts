@@ -80,7 +80,7 @@ export async function deleteEntry(id: string): Promise<void> {
 export async function getPendingEntries(): Promise<Entry[]> {
   const db = await getDatabase();
   return db.getAllAsync<Entry>(
-    `SELECT * FROM entries WHERE processing_status IN ('pending', 'failed') ORDER BY created_at ASC`
+    `SELECT * FROM entries WHERE processing_status IN ('pending', 'failed', 'processing') ORDER BY created_at ASC`
   );
 }
 

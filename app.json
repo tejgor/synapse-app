@@ -39,8 +39,7 @@
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1
           }
         }
-      ],
-      "expo-audio"
+      ]
     ],
     "experiments": {
       "typedRoutes": true
