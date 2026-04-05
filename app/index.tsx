@@ -4,25 +4,110 @@ import {
   Text,
   TextInput,
   FlatList,
-  Pressable,
   StyleSheet,
   RefreshControl,
   Alert,
+  Pressable,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  interpolateColor,
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { colors, spacing, borderRadius } from '@/src/constants/theme';
+import { colors, spacing, borderRadius, shadows, animation } from '@/src/constants/theme';
 import { EntryCard } from '@/src/components/EntryCard';
 import { TopicTag } from '@/src/components/TopicTag';
 import { useEntries } from '@/src/hooks/useEntries';
 import { deleteEntry } from '@/src/db/entries';
+import { usePressAnimation, useEmptyStateEntrance } from '@/src/utils/animations';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+function FAB({ onPress }: { onPress: () => void }) {
+  const { animatedStyle, onPressIn, onPressOut } = usePressAnimation(0.88);
+  return (
+    <AnimatedPressable
+      style={[styles.fab, animatedStyle]}
+      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+    >
+      <Ionicons name="add" size={26} color={colors.text} />
+    </AnimatedPressable>
+  );
+}
+
+function EmptyState({ onPress }: { onPress: () => void }) {
+  const iconStyle = useEmptyStateEntrance(0);
+  const titleStyle = useEmptyStateEntrance(1);
+  const subtitleStyle = useEmptyStateEntrance(2);
+  const buttonStyle = useEmptyStateEntrance(3);
+  const { animatedStyle: pressStyle, onPressIn, onPressOut } = usePressAnimation(0.96);
+
+  return (
+    <View style={styles.emptyState}>
+      <Animated.View style={[styles.emptyIconHalo, iconStyle]}>
+        <Ionicons name="sparkles" size={36} color={colors.accentMuted} />
+      </Animated.View>
+      <Animated.Text style={[styles.emptyTitle, titleStyle]}>
+        Your knowledge base
+      </Animated.Text>
+      <Animated.Text style={[styles.emptySubtitle, subtitleStyle]}>
+        Share a video link to start{'\n'}capturing insights
+      </Animated.Text>
+      <AnimatedPressable
+        style={[styles.manualButton, buttonStyle, pressStyle]}
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+      >
+        <Text style={styles.manualButtonText}>Add link</Text>
+      </AnimatedPressable>
+    </View>
+  );
+}
+
+function SearchBar({ value, onChangeText }: { value: string; onChangeText: (t: string) => void }) {
+  const focused = useSharedValue(0);
+
+  const animatedBorderStyle = useAnimatedStyle(() => ({
+    borderWidth: 1,
+    borderColor: interpolateColor(
+      focused.value,
+      [0, 1],
+      ['transparent', colors.accentMuted]
+    ),
+    backgroundColor: interpolateColor(
+      focused.value,
+      [0, 1],
+      [colors.searchBg, colors.surfaceOverlay]
+    ),
+  }));
+
+  return (
+    <Animated.View style={[styles.searchRow, animatedBorderStyle]}>
+      <Ionicons name="search" size={18} color={colors.textPlaceholder} style={styles.searchIcon} />
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Search your knowledge..."
+        placeholderTextColor={colors.textPlaceholder}
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={() => { focused.value = withTiming(1, { duration: animation.duration.fast }); }}
+        onBlur={() => { focused.value = withTiming(0, { duration: animation.duration.fast }); }}
+      />
+    </Animated.View>
+  );
+}
 
 export default function LibraryScreen() {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | undefined>();
   const { entries, loading, refresh } = useEntries(search || undefined, activeCategory);
 
-  // Refresh when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       refresh();
@@ -47,7 +132,6 @@ export default function LibraryScreen() {
     ]);
   }, [refresh]);
 
-  // Collect unique categories for filter bar
   const categories = [...new Set(entries.map((e) => e.category).filter(Boolean))] as string[];
 
   return (
@@ -55,9 +139,10 @@ export default function LibraryScreen() {
       <FlatList
         data={entries}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
+        renderItem={({ item, index }) => (
           <EntryCard
             entry={item}
+            index={index}
             onPress={() => router.push(`/entry/${item.id}`)}
             onCategoryPress={handleCategoryPress}
             onDelete={() => handleDelete(item.id)}
@@ -66,16 +151,7 @@ export default function LibraryScreen() {
         ListHeaderComponent={
           <>
             <View style={styles.searchContainer}>
-              <View style={styles.searchRow}>
-                <Ionicons name="search" size={16} color={colors.placeholder} style={styles.searchIcon} />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Search your knowledge..."
-                  placeholderTextColor={colors.placeholder}
-                  value={search}
-                  onChangeText={setSearch}
-                />
-              </View>
+              <SearchBar value={search} onChangeText={setSearch} />
             </View>
             {categories.length > 0 && (
               <View style={styles.tagBar}>
@@ -106,30 +182,12 @@ export default function LibraryScreen() {
         }
         contentContainerStyle={entries.length === 0 ? styles.emptyContainer : styles.listContent}
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Ionicons name="bulb" size={56} color={colors.textMuted} style={styles.emptyIcon} />
-            <Text style={styles.emptyTitle}>No knowledge yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Share a video link to start building{'\n'}your knowledge base
-            </Text>
-            <Pressable
-              style={styles.manualButton}
-              onPress={() => router.push('/capture')}
-            >
-              <Text style={styles.manualButtonText}>+ Add link</Text>
-            </Pressable>
-          </View>
+          <EmptyState onPress={() => router.push('/capture')} />
         }
       />
 
-      {/* FAB */}
       {entries.length > 0 && (
-        <Pressable
-          style={styles.fab}
-          onPress={() => router.push('/capture')}
-        >
-          <Ionicons name="add" size={28} color={colors.text} />
-        </Pressable>
+        <FAB onPress={() => router.push('/capture')} />
       )}
     </View>
   );
@@ -141,33 +199,33 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   searchContainer: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
     paddingBottom: spacing.sm,
   },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.searchBg,
-    borderRadius: borderRadius.md,
+    borderRadius: 20,
+    paddingHorizontal: spacing.md,
     borderWidth: 1,
-    borderColor: colors.cardBorder,
-    paddingHorizontal: spacing.sm + 4,
+    borderColor: 'transparent',
   },
   searchIcon: {
     marginRight: spacing.sm,
   },
   searchInput: {
     flex: 1,
-    paddingVertical: spacing.sm + 4,
+    paddingVertical: 12,
     color: colors.text,
     fontSize: 15,
   },
   tagBar: {
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.md,
   },
   tagList: {
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.lg,
     gap: spacing.sm,
   },
   listContent: {
@@ -181,28 +239,36 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
-    gap: spacing.sm,
+    gap: spacing.md,
   },
-  emptyIcon: {
+  emptyIconHalo: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.accentSubtle,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: spacing.sm,
   },
   emptyTitle: {
     color: colors.text,
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '700',
+    letterSpacing: -0.3,
   },
   emptySubtitle: {
-    color: colors.textMuted,
+    color: colors.textTertiary,
     fontSize: 15,
     textAlign: 'center',
     lineHeight: 22,
   },
   manualButton: {
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     backgroundColor: colors.accent,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 4,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: 12,
+    ...shadows.glow,
   },
   manualButtonText: {
     color: colors.text,
@@ -213,16 +279,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: spacing.xl,
     right: spacing.lg,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 58,
+    height: 58,
+    borderRadius: borderRadius.xl,
     backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: colors.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    ...shadows.glow,
   },
 });

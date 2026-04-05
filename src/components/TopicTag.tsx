@@ -1,6 +1,8 @@
 import React from 'react';
-import { Text, Pressable, StyleSheet } from 'react-native';
-import { colors, borderRadius, spacing } from '../constants/theme';
+import { Text, StyleSheet, Pressable } from 'react-native';
+import Animated from 'react-native-reanimated';
+import { colors, borderRadius } from '../constants/theme';
+import { usePressAnimation } from '../utils/animations';
 
 interface TopicTagProps {
   tag: string;
@@ -8,33 +10,36 @@ interface TopicTagProps {
   active?: boolean;
 }
 
+const AnimatedTouchable = Animated.createAnimatedComponent(Pressable);
+
 export function TopicTag({ tag, onPress, active }: TopicTagProps) {
+  const { animatedStyle, onPressIn, onPressOut } = usePressAnimation(0.93);
+
   return (
-    <Pressable
+    <AnimatedTouchable
       onPress={onPress}
-      style={[styles.container, active && styles.active]}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      style={[styles.container, active && styles.active, animatedStyle]}
     >
       <Text style={[styles.text, active && styles.activeText]}>{tag}</Text>
-    </Pressable>
+    </AnimatedTouchable>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.accentGlow,
-    borderWidth: 1,
-    borderColor: 'rgba(99,102,241,0.3)',
+    backgroundColor: colors.accentSubtle,
     borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
   },
   active: {
     backgroundColor: colors.accent,
-    borderColor: colors.accent,
   },
   text: {
-    color: colors.accentLight,
-    fontSize: 13,
+    color: colors.accentMuted,
+    fontSize: 12,
     fontWeight: '600',
   },
   activeText: {

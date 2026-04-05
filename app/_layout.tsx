@@ -53,9 +53,10 @@ export default function RootLayout() {
         screenOptions={{
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.text,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTitleStyle: { fontWeight: '700', fontSize: 17 },
           contentStyle: { backgroundColor: colors.background },
           animation: 'slide_from_right',
+          headerShadowVisible: false,
         }}
       >
         <Stack.Screen
@@ -70,14 +71,14 @@ export default function RootLayout() {
             animation: 'slide_from_bottom',
             headerLeft: () => (
               <Pressable onPress={() => router.back()}>
-                <Ionicons name="close" size={24} color={colors.text} />
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
               </Pressable>
             ),
           }}
         />
         <Stack.Screen
           name="entry/[id]"
-          options={{ title: '' }}
+          options={{ title: '', headerBackTitle: '' }}
         />
       </Stack>
     </ShareIntentProvider>

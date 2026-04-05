@@ -8,14 +8,23 @@ import {
   Linking,
   ActivityIndicator,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  interpolate,
+} from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, borderRadius } from '@/src/constants/theme';
+import { colors, spacing, borderRadius, shadows, typography, animation } from '@/src/constants/theme';
 import { TopicTag } from '@/src/components/TopicTag';
 import { TagPill } from '@/src/components/TagPill';
 import { KeyDetailRow } from '@/src/components/KeyDetailRow';
 import { getEntryById } from '@/src/db/entries';
 import type { Entry, KeyDetail } from '@/src/types';
+import { usePressAnimation } from '@/src/utils/animations';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const PLATFORM_LABELS: Record<string, string> = {
   tiktok: 'TikTok',
@@ -23,11 +32,65 @@ const PLATFORM_LABELS: Record<string, string> = {
   youtube: 'YouTube',
 };
 
+function SourceButton({ onPress, text, platform }: { onPress: () => void; text: string; platform: string }) {
+  const { animatedStyle, onPressIn, onPressOut } = usePressAnimation(0.975);
+  return (
+    <AnimatedPressable
+      style={[styles.sourceButton, animatedStyle]}
+      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+    >
+      <View>
+        <Text style={styles.sourceButtonText}>{text}</Text>
+        <Text style={styles.sourcePlatform}>{platform}</Text>
+      </View>
+      <Ionicons name="open-outline" size={16} color={colors.textTertiary} />
+    </AnimatedPressable>
+  );
+}
+
+function TranscriptSection({ transcript }: { transcript: string }) {
+  const [open, setOpen] = useState(false);
+  const progress = useSharedValue(0);
+
+  const toggle = useCallback(() => {
+    const next = !open;
+    setOpen(next);
+    progress.value = withTiming(next ? 1 : 0, { duration: animation.duration.normal });
+  }, [open]);
+
+  const animatedContentStyle = useAnimatedStyle(() => ({
+    maxHeight: interpolate(progress.value, [0, 1], [0, 4000]),
+    opacity: interpolate(progress.value, [0, 0.4, 1], [0, 0, 1]),
+    overflow: 'hidden',
+  }));
+
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(progress.value, [0, 1], [0, 180])}deg` }],
+  }));
+
+  return (
+    <View style={styles.section}>
+      <Pressable style={styles.transcriptToggle} onPress={toggle}>
+        <Text style={styles.sectionTitle}>Transcript</Text>
+        <Animated.View style={chevronStyle}>
+          <Ionicons name="chevron-down" size={16} color={colors.textTertiary} />
+        </Animated.View>
+      </Pressable>
+      <Animated.View style={animatedContentStyle}>
+        <View style={styles.transcriptCard}>
+          <Text style={styles.transcriptText}>{transcript}</Text>
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function DetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [entry, setEntry] = useState<Entry | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showTranscript, setShowTranscript] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -35,10 +98,6 @@ export default function DetailScreen() {
       .then(setEntry)
       .finally(() => setLoading(false));
   }, [id]);
-
-  const toggleTranscript = useCallback(() => {
-    setShowTranscript((v) => !v);
-  }, []);
 
   if (loading) {
     return (
@@ -96,7 +155,7 @@ export default function DetailScreen() {
       {/* Processing banner */}
       {isProcessing && (
         <View style={styles.processingBanner}>
-          <ActivityIndicator size="small" color={colors.accent} />
+          <ActivityIndicator size="small" color={colors.warning} />
           <Text style={styles.processingText}>Extracting knowledge...</Text>
         </View>
       )}
@@ -122,33 +181,17 @@ export default function DetailScreen() {
         </View>
       )}
 
-      {/* Transcript (collapsible) */}
+      {/* Transcript (collapsible with animation) */}
       {entry.video_transcript && (
-        <View style={styles.section}>
-          <Pressable style={styles.transcriptToggle} onPress={toggleTranscript}>
-            <Text style={styles.sectionTitle}>Transcript</Text>
-            <Ionicons
-              name={showTranscript ? 'chevron-up' : 'chevron-down'}
-              size={16}
-              color={colors.textMuted}
-            />
-          </Pressable>
-          {showTranscript && (
-            <View style={styles.transcriptCard}>
-              <Text style={styles.transcriptText}>{entry.video_transcript}</Text>
-            </View>
-          )}
-        </View>
+        <TranscriptSection transcript={entry.video_transcript} />
       )}
 
       {/* Source link */}
-      <Pressable
-        style={styles.sourceButton}
+      <SourceButton
         onPress={() => Linking.openURL(entry.source_url)}
-      >
-        <Text style={styles.sourceButtonText}>View source</Text>
-        <Text style={styles.sourcePlatform}>{platformLabel}</Text>
-      </Pressable>
+        text="View source"
+        platform={platformLabel}
+      />
     </ScrollView>
   );
 }
@@ -159,9 +202,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    padding: spacing.lg,
+    padding: spacing.xl,
     paddingBottom: 80,
-    gap: spacing.xl,
+    gap: 40,
   },
   loadingContainer: {
     flex: 1,
@@ -170,11 +213,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   errorText: {
-    color: colors.textMuted,
+    color: colors.textTertiary,
     fontSize: 16,
   },
   header: {
-    gap: spacing.md,
+    gap: 20,
   },
   headerMeta: {
     flexDirection: 'row',
@@ -182,67 +225,58 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   date: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '500',
+    color: colors.textTertiary,
+    ...typography.caption,
   },
   title: {
     color: colors.text,
-    fontSize: 22,
-    fontWeight: '800',
-    lineHeight: 30,
+    ...typography.heading,
   },
   summary: {
     color: colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 23,
+    ...typography.body,
   },
   tagsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.xs,
+    gap: spacing.xs + 2,
   },
   processingBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
     padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.accent,
+    ...shadows.sm,
   },
   failedBanner: {
-    borderColor: colors.error,
+    backgroundColor: colors.errorSubtle,
   },
   processingText: {
     color: colors.textSecondary,
-    fontSize: 14,
+    ...typography.caption,
   },
   failedText: {
     color: colors.error,
-    fontSize: 14,
+    ...typography.caption,
   },
   section: {
     gap: spacing.sm,
   },
   sectionTitle: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
+    color: colors.textTertiary,
+    ...typography.overline,
   },
   detailsCard: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: 20,
+    ...shadows.sm,
   },
   detailDivider: {
-    height: 1,
-    backgroundColor: colors.cardBorder,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.borderSubtle,
     marginVertical: spacing.xs,
   },
   transcriptToggle: {
@@ -251,11 +285,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   transcriptCard: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: 20,
+    ...shadows.sm,
   },
   transcriptText: {
     color: colors.textSecondary,
@@ -266,20 +299,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
+    ...shadows.sm,
   },
   sourceButtonText: {
-    color: colors.accentLight,
+    color: colors.accent,
     fontSize: 15,
     fontWeight: '600',
   },
   sourcePlatform: {
-    color: colors.textMuted,
-    fontSize: 12,
+    color: colors.textTertiary,
+    ...typography.caption,
+    marginTop: 2,
   },
 });

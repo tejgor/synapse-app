@@ -3,21 +3,30 @@ import {
   View,
   Text,
   TextInput,
-  Pressable,
   StyleSheet,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  interpolateColor,
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, router } from 'expo-router';
 import { randomUUID } from 'expo-crypto';
-import { colors, spacing, borderRadius } from '@/src/constants/theme';
+import { colors, spacing, borderRadius, shadows, animation } from '@/src/constants/theme';
 import { detectPlatform } from '@/src/services/thumbnail';
 import { createEntry } from '@/src/db/entries';
 import { processEntry } from '@/src/services/processing';
 import type { SourcePlatform } from '@/src/types';
+import { usePressAnimation } from '@/src/utils/animations';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const PLATFORM_LABELS: Record<SourcePlatform, string> = {
   tiktok: 'TikTok',
@@ -36,6 +45,9 @@ export default function CaptureScreen() {
   const [url, setUrl] = useState(params.url || '');
   const [platform, setPlatform] = useState<SourcePlatform | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const inputFocused = useSharedValue(0);
+  const { animatedStyle: buttonPressStyle, onPressIn, onPressOut } = usePressAnimation(0.97);
 
   useEffect(() => {
     setPlatform(url ? detectPlatform(url) : null);
@@ -64,9 +76,7 @@ export default function CaptureScreen() {
         created_at: new Date().toISOString(),
       });
 
-      // Fire and forget — processing happens in background
       processEntry(id);
-
       router.back();
     } catch (err) {
       console.error('Save failed:', err);
@@ -76,6 +86,20 @@ export default function CaptureScreen() {
     }
   }, [url, platform]);
 
+  const animatedInputStyle = useAnimatedStyle(() => ({
+    borderWidth: 1,
+    borderColor: interpolateColor(
+      inputFocused.value,
+      [0, 1],
+      ['transparent', colors.accentMuted]
+    ),
+    backgroundColor: interpolateColor(
+      inputFocused.value,
+      [0, 1],
+      [colors.surface, colors.surfaceOverlay]
+    ),
+  }));
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -84,24 +108,30 @@ export default function CaptureScreen() {
       <View style={styles.body}>
         {/* Platform icon */}
         <View style={styles.iconContainer}>
-          <Ionicons
-            name={(platform ? PLATFORM_ICONS[platform] : 'link') as any}
-            size={52}
-            color={platform ? colors.accentLight : colors.textMuted}
-          />
+          <View style={styles.iconCircle}>
+            <Ionicons
+              name={(platform ? PLATFORM_ICONS[platform] : 'link') as any}
+              size={34}
+              color={platform ? colors.accent : colors.textTertiary}
+            />
+          </View>
         </View>
 
         {/* URL input */}
-        <TextInput
-          style={styles.urlInput}
-          placeholder="Paste TikTok, Instagram, or YouTube URL..."
-          placeholderTextColor={colors.placeholder}
-          value={url}
-          onChangeText={setUrl}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoFocus={!params.url}
-        />
+        <Animated.View style={[styles.urlInputWrapper, animatedInputStyle]}>
+          <TextInput
+            style={styles.urlInput}
+            placeholder="Paste TikTok, Instagram, or YouTube URL..."
+            placeholderTextColor={colors.textPlaceholder}
+            value={url}
+            onChangeText={setUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus={!params.url}
+            onFocus={() => { inputFocused.value = withTiming(1, { duration: animation.duration.fast }); }}
+            onBlur={() => { inputFocused.value = withTiming(0, { duration: animation.duration.fast }); }}
+          />
+        </Animated.View>
 
         {/* Platform badge */}
         {platform && (
@@ -110,17 +140,19 @@ export default function CaptureScreen() {
       </View>
 
       {/* Save button */}
-      <Pressable
+      <AnimatedPressable
         onPress={handleSave}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
         disabled={saving || !platform}
-        style={[styles.saveButton, (!platform || saving) && styles.saveButtonDisabled]}
+        style={[styles.saveButton, (!platform || saving) && styles.saveButtonDisabled, buttonPressStyle]}
       >
         {saving ? (
           <ActivityIndicator color={colors.text} />
         ) : (
           <Text style={styles.saveText}>Add to Knowledge Base</Text>
         )}
-      </Pressable>
+      </AnimatedPressable>
     </KeyboardAvoidingView>
   );
 }
@@ -129,7 +161,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.xl,
     paddingTop: spacing.xl,
     paddingBottom: spacing.xl + 16,
     justifyContent: 'space-between',
@@ -141,36 +173,42 @@ const styles = StyleSheet.create({
   },
   iconContainer: {
     alignItems: 'center',
-    paddingVertical: spacing.xl,
+    paddingVertical: spacing.xxl,
+  },
+  iconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.surfaceRaised,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  urlInputWrapper: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: colors.surface,
   },
   urlInput: {
-    backgroundColor: colors.searchBg,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
+    padding: 18,
     color: colors.text,
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
+    fontSize: 16,
   },
   platformBadge: {
-    color: colors.accentLight,
+    color: colors.accent,
     fontSize: 13,
     textAlign: 'center',
     fontWeight: '600',
   },
   saveButton: {
     backgroundColor: colors.accent,
-    borderRadius: borderRadius.md,
+    borderRadius: 20,
     paddingVertical: spacing.md,
     alignItems: 'center',
-    shadowColor: colors.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    elevation: 8,
+    ...shadows.glow,
   },
   saveButtonDisabled: {
-    opacity: 0.4,
+    opacity: 0.35,
   },
   saveText: {
     color: colors.text,

@@ -32,13 +32,13 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     gap: spacing.md,
-    paddingVertical: spacing.xs + 2,
+    paddingVertical: spacing.sm,
   },
   label: {
-    color: colors.accentLight,
+    color: colors.textTertiary,
     fontSize: 13,
-    fontWeight: '700',
-    width: 80,
+    fontWeight: '600',
+    width: 100,
     flexShrink: 0,
   },
   valueContainer: {
@@ -46,14 +46,13 @@ const styles = StyleSheet.create({
   },
   value: {
     color: colors.text,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 14,
+    lineHeight: 20,
     flex: 1,
   },
   linkValue: {
-    color: colors.accentLight,
-    fontSize: 13,
-    lineHeight: 19,
-    textDecorationLine: 'underline',
+    color: colors.accent,
+    fontSize: 14,
+    lineHeight: 20,
   },
 });

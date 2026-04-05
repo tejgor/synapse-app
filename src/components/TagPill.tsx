@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text, Pressable, StyleSheet } from 'react-native';
-import { colors, borderRadius, spacing } from '../constants/theme';
+import { colors, borderRadius } from '../constants/theme';
 
 interface TagPillProps {
   tag: string;
@@ -20,14 +20,14 @@ export function TagPill({ tag, onPress }: TagPillProps) {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: colors.accentSubtle,
     borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
   text: {
-    color: colors.textMuted,
-    fontSize: 12,
+    color: colors.textTertiary,
+    fontSize: 11,
     fontWeight: '500',
   },
 });
