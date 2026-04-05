@@ -1,6 +1,7 @@
 import type { ProcessResponse, SourcePlatform } from '../types';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_SECRET = process.env.EXPO_PUBLIC_API_SECRET || '';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -15,7 +16,10 @@ export async function processEntry(
   try {
     response = await fetch(`${API_BASE_URL}/api/process`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(API_SECRET ? { 'X-API-Key': API_SECRET } : {}),
+      },
       body: JSON.stringify({ videoUrl, platform }),
       signal: controller.signal,
     });

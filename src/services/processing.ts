@@ -5,7 +5,7 @@ import type { ProcessResponse } from '../types';
 
 // Background request module — iOS only
 let BackgroundRequest: {
-  startRequest(entryId: string, url: string, bodyJson: string): void;
+  startRequest(entryId: string, url: string, bodyJson: string, headersJson: string): void;
   getPendingResults(): Array<{ entryId: string; response?: string; error?: string; statusCode?: number }>;
   clearResult(entryId: string): void;
   getInFlightEntryIds(): string[];
@@ -94,8 +94,10 @@ export async function processEntry(entryId: string): Promise<void> {
     // Hand off to iOS background URLSession — no time limit, survives suspension/termination
     const apiUrl = `${process.env.EXPO_PUBLIC_API_URL}/api/process`;
     const bodyJson = JSON.stringify({ videoUrl: entry.source_url, platform: entry.source_platform });
+    const apiSecret = process.env.EXPO_PUBLIC_API_SECRET;
+    const headersJson = JSON.stringify(apiSecret ? { 'X-API-Key': apiSecret } : {});
     console.log(`[processing] handing off to background URLSession url=${entry.source_url}`);
-    BackgroundRequest.startRequest(entryId, apiUrl, bodyJson);
+    BackgroundRequest.startRequest(entryId, apiUrl, bodyJson, headersJson);
   } else {
     // Foreground fallback (Android / development)
     try {

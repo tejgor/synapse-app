@@ -8,7 +8,7 @@ export interface BackgroundRequestResult {
 }
 
 const mod = requireNativeModule('ExpoBackgroundRequest') as {
-  startRequest(entryId: string, url: string, bodyJson: string): void;
+  startRequest(entryId: string, url: string, bodyJson: string, headersJson: string): void;
   getPendingResults(): BackgroundRequestResult[];
   clearResult(entryId: string): void;
   getInFlightEntryIds(): string[];

@@ -64,7 +64,7 @@ public class BackgroundRequestModule: Module {
     }
 
     // Called from JS to start a background upload request
-    Function("startRequest") { (entryId: String, url: String, bodyJson: String) in
+    Function("startRequest") { (entryId: String, url: String, bodyJson: String, headersJson: String) in
       guard let session = self.session, let requestUrl = URL(string: url) else {
         print("[BackgroundRequest] Invalid session or URL: \(url)")
         return
@@ -73,6 +73,14 @@ public class BackgroundRequestModule: Module {
       var request = URLRequest(url: requestUrl)
       request.httpMethod = "POST"
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+      // Apply custom headers (e.g. API key)
+      if let data = headersJson.data(using: .utf8),
+         let headers = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+        for (key, value) in headers {
+          request.setValue(value, forHTTPHeaderField: key)
+        }
+      }
 
       // Background upload tasks require the body as a file
       let tempFile = FileManager.default.temporaryDirectory
