@@ -39,7 +39,8 @@
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1
           }
         }
-      ]
+      ],
+      "./plugins/withBackgroundURLSession"
     ],
     "experiments": {
       "typedRoutes": true

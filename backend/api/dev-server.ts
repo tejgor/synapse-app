@@ -12,6 +12,7 @@ app.post('/api/process', (req, res) => {
 
 const PORT = process.env.PORT || 3002;
 const server = createServer(app);
+server.timeout = 180_000; // 3 min safety net — worst case: 90s Supadata + 60s Claude
 server.listen(PORT, () => {
   console.log(`Dev server running on http://localhost:${PORT}`);
 });

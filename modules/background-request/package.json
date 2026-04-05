@@ -1,0 +1,6 @@
+{
+  "name": "expo-background-request",
+  "version": "1.0.0",
+  "description": "iOS background URLSession networking for Synapse",
+  "main": "index.ts"
+}

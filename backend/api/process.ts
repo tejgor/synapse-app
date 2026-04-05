@@ -46,8 +46,17 @@ interface ProcessResponse {
   metadata: VideoMetadata | null;
 }
 
+const SUPADATA_TIMEOUT_MS = 90_000;
+const CLAUDE_TIMEOUT_MS = 60_000;
+
 function log(step: string, detail: string) {
   console.log(`[process] ${step}: ${detail}`);
+}
+
+function supadataAbort(label: string): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), SUPADATA_TIMEOUT_MS);
+  return controller.signal;
 }
 
 async function fetchTranscript(videoUrl: string, isYouTube: boolean, apiKey: string): Promise<string> {
@@ -58,13 +67,14 @@ async function fetchTranscript(videoUrl: string, isYouTube: boolean, apiKey: str
   log('transcript', `fetching from Supadata (${isYouTube ? 'youtube' : 'generic'})...`);
   const transcriptRes = await fetch(endpoint, {
     headers: { 'x-api-key': apiKey },
+    signal: supadataAbort('transcript'),
   });
 
   if (!transcriptRes.ok) {
     const body = await transcriptRes.text();
     const detail = body.trimStart().startsWith('<') ? 'HTML error page' : body.slice(0, 120);
     log('transcript', `FAILED — ${transcriptRes.status}: ${detail}`);
-    throw new Error(`Transcript fetch failed (${transcriptRes.status})`);
+    throw new Error(`Transcript fetch failed (${transcriptRes.status === 524 ? 'Supadata timed out' : transcriptRes.status})`);
   }
 
   const data = await transcriptRes.json() as { content: { text: string }[] | string };
@@ -90,7 +100,7 @@ async function fetchMetadata(videoUrl: string, apiKey: string): Promise<VideoMet
     log('metadata', 'fetching from Supadata...');
     const res = await fetch(
       `https://api.supadata.ai/v1/metadata?url=${encodeURIComponent(videoUrl)}`,
-      { headers: { 'x-api-key': apiKey } }
+      { headers: { 'x-api-key': apiKey }, signal: supadataAbort('metadata') }
     );
     if (!res.ok) {
       log('metadata', `FAILED — ${res.status} (non-blocking)`);
@@ -146,7 +156,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   ]);
 
   if (transcriptResult.status === 'rejected') {
-    return res.status(422).json({ error: transcriptResult.reason instanceof Error ? transcriptResult.reason.message : 'Transcript fetch failed' });
+    const reason = transcriptResult.reason;
+    const msg = reason?.name === 'AbortError' ? `Transcript fetch timed out (${SUPADATA_TIMEOUT_MS / 1000}s)` : (reason instanceof Error ? reason.message : 'Transcript fetch failed');
+    log('transcript', `FAILED — ${msg}`);
+    return res.status(422).json({ error: msg });
   }
 
   const transcript = transcriptResult.value;
@@ -160,6 +173,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     log('extraction', 'calling Claude...');
+    const claudeAbort = new AbortController();
+    const claudeTimer = setTimeout(() => claudeAbort.abort(), CLAUDE_TIMEOUT_MS);
+
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -172,7 +188,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         max_tokens: 1024,
         messages: [{ role: 'user', content: buildKnowledgePrompt(transcript, videoUrl, metadata ?? undefined) }],
       }),
+      signal: claudeAbort.signal,
     });
+
+    clearTimeout(claudeTimer);
 
     if (!claudeRes.ok) {
       const body = await claudeRes.text();
@@ -207,9 +226,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     log('done', `title="${result.title}" category="${result.category}" tags=${result.tags.length} keyDetails=${result.keyDetails.length} hasMetadata=${metadata !== null}`);
     return res.status(200).json(result);
-  } catch (err) {
-    log('extraction', `FAILED — ${err}`);
-    return res.status(422).json({ error: 'AI extraction failed' });
+  } catch (err: any) {
+    const msg = err?.name === 'AbortError'
+      ? `AI extraction timed out (${CLAUDE_TIMEOUT_MS / 1000}s)`
+      : `AI extraction failed — ${err}`;
+    log('extraction', `FAILED — ${msg}`);
+    return res.status(422).json({ error: msg });
   }
 }
 
