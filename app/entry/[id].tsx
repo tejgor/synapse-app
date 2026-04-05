@@ -22,7 +22,7 @@ import {
   colors, spacing, borderRadius, shadows, typography, animation, categoryColor, categoryTint,
 } from '@/src/constants/theme';
 import { getEntryById } from '@/src/db/entries';
-import type { Entry, KeyDetail } from '@/src/types';
+import type { Entry, KeyDetail, ContentSection, ContentItem } from '@/src/types';
 import { usePressAnimation } from '@/src/utils/animations';
 import { useCrystallize } from '@/src/utils/useCrystallize';
 import { SynapsePulse } from '@/src/components/SynapsePulse';
@@ -85,6 +85,138 @@ function InsightCard({
         </Pressable>
       ) : (
         <Text style={styles.insightValue} numberOfLines={3}>{value}</Text>
+      )}
+    </Animated.View>
+  );
+}
+
+// ─── Content type icon mapping ────────────────────────────────────────────────
+
+const CONTENT_TYPE_ICONS: Record<string, string> = {
+  tutorial: 'school-outline',
+  walkthrough: 'school-outline',
+  demo: 'school-outline',
+  review: 'star-half-outline',
+  comparison: 'git-compare-outline',
+  'quick tip': 'flash-outline',
+  tip: 'flash-outline',
+  recipe: 'restaurant-outline',
+  explainer: 'bulb-outline',
+  'resource list': 'list-outline',
+  opinion: 'chatbubble-outline',
+  news: 'newspaper-outline',
+  story: 'book-outline',
+};
+
+function getContentTypeIcon(contentType: string): string {
+  const key = contentType.toLowerCase();
+  return CONTENT_TYPE_ICONS[key] || 'document-text-outline';
+}
+
+// ─── Section renderers ───────────────────────────────────────────────────────
+
+function OrderedItem({ item, index, total, catColor, delay }: {
+  item: ContentItem; index: number; total: number; catColor: string; delay: number;
+}) {
+  const crystalStyle = useCrystallize({ delay, seed: delay });
+  return (
+    <Animated.View style={[styles.orderedItem, crystalStyle]}>
+      <View style={styles.stepConnector}>
+        <View style={[styles.stepCircle, { backgroundColor: catColor }]}>
+          <Text style={styles.stepNumber}>{index + 1}</Text>
+        </View>
+        {index < total - 1 && <View style={[styles.stepLine, { backgroundColor: `${catColor}33` }]} />}
+      </View>
+      <Text style={styles.orderedText}>{item.text}</Text>
+    </Animated.View>
+  );
+}
+
+function OrderedSection({ items, catColor, baseDelay }: {
+  items: ContentItem[]; catColor: string; baseDelay: number;
+}) {
+  return (
+    <View style={styles.orderedSection}>
+      {items.map((item, i) => (
+        <OrderedItem key={i} item={item} index={i} total={items.length} catColor={catColor} delay={baseDelay + i * 50} />
+      ))}
+    </View>
+  );
+}
+
+function UnorderedItem({ item, catColor, delay }: {
+  item: ContentItem; catColor: string; delay: number;
+}) {
+  const crystalStyle = useCrystallize({ delay, seed: delay });
+  return (
+    <Animated.View style={[styles.unorderedItem, crystalStyle]}>
+      <View style={[styles.bulletDot, { backgroundColor: catColor }]} />
+      <Text style={styles.unorderedText}>{item.text}</Text>
+    </Animated.View>
+  );
+}
+
+function UnorderedSection({ items, catColor, baseDelay }: {
+  items: ContentItem[]; catColor: string; baseDelay: number;
+}) {
+  return (
+    <View style={styles.unorderedSection}>
+      {items.map((item, i) => (
+        <UnorderedItem key={i} item={item} catColor={catColor} delay={baseDelay + i * 40} />
+      ))}
+    </View>
+  );
+}
+
+function KeyValueSection({ items, catColor, baseDelay }: {
+  items: ContentItem[]; catColor: string; baseDelay: number;
+}) {
+  return (
+    <View style={styles.insightGrid}>
+      {items.map((item, i) => (
+        <InsightCard
+          key={i}
+          label={item.label || ''}
+          value={item.text}
+          catColor={catColor}
+          delay={baseDelay + i * 60}
+        />
+      ))}
+    </View>
+  );
+}
+
+function SingleSection({ items, catColor, baseDelay }: {
+  items: ContentItem[]; catColor: string; baseDelay: number;
+}) {
+  const text = items.map((item) => item.text).join('\n\n');
+  const crystalStyle = useCrystallize({ delay: baseDelay, seed: baseDelay });
+  return (
+    <Animated.View style={[styles.singleBlock, { backgroundColor: `${catColor}14` }, crystalStyle]}>
+      <View style={[styles.singleBar, { backgroundColor: catColor }]} />
+      <Text style={styles.singleText}>{text}</Text>
+    </Animated.View>
+  );
+}
+
+function SectionBlock({ section, catColor, baseDelay }: {
+  section: ContentSection; catColor: string; baseDelay: number;
+}) {
+  const crystalStyle = useCrystallize({ delay: baseDelay, seed: baseDelay });
+  return (
+    <Animated.View style={crystalStyle}>
+      <Text style={styles.sectionLabel}>{section.heading}</Text>
+      {section.style === 'ordered' && (
+        <OrderedSection items={section.items} catColor={catColor} baseDelay={baseDelay + 20} />
+      )}
+      {section.style === 'unordered' && (
+        <UnorderedSection items={section.items} catColor={catColor} baseDelay={baseDelay + 20} />
+      )}
+      {section.style === 'key-value' && (
+        <KeyValueSection items={section.items} catColor={catColor} baseDelay={baseDelay + 20} />
+      )}
+      {section.style === 'single' && (
+        <SingleSection items={section.items} catColor={catColor} baseDelay={baseDelay + 20} />
       )}
     </Animated.View>
   );
@@ -200,7 +332,9 @@ export default function DetailScreen() {
   }
 
   const tags: string[] = entry.tags ? JSON.parse(entry.tags) : [];
-  const keyDetails: KeyDetail[] = entry.key_details ? JSON.parse(entry.key_details) : [];
+  const isLegacy = !entry.content_type;
+  const keyDetails: KeyDetail[] = isLegacy && entry.key_details ? JSON.parse(entry.key_details) : [];
+  const sections: ContentSection[] = !isLegacy && entry.key_details ? JSON.parse(entry.key_details) : [];
   const catColor = entry.category ? categoryColor(entry.category) : colors.accent;
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
@@ -213,13 +347,21 @@ export default function DetailScreen() {
     <View style={styles.outer}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-        {/* ── Category pill ── */}
-        {entry.category && (
+        {/* ── Category pill + Content type badge ── */}
+        {(entry.category || entry.content_type) && (
           <Animated.View style={[styles.catRow, dateCrystal]}>
-            <View style={[styles.catPill, { backgroundColor: `${catColor}22` }]}>
-              <View style={[styles.catDot, { backgroundColor: catColor }]} />
-              <Text style={[styles.catLabel, { color: catColor }]}>{entry.category}</Text>
-            </View>
+            {entry.category && (
+              <View style={[styles.catPill, { backgroundColor: `${catColor}22` }]}>
+                <View style={[styles.catDot, { backgroundColor: catColor }]} />
+                <Text style={[styles.catLabel, { color: catColor }]}>{entry.category}</Text>
+              </View>
+            )}
+            {entry.content_type && (
+              <View style={styles.typeBadge}>
+                <Ionicons name={getContentTypeIcon(entry.content_type) as any} size={12} color={colors.textTertiary} />
+                <Text style={styles.typeLabel}>{entry.content_type}</Text>
+              </View>
+            )}
           </Animated.View>
         )}
 
@@ -301,10 +443,22 @@ export default function DetailScreen() {
         )}
 
         {/* ── Node divider ── */}
-        {keyDetails.length > 0 && <NodeDivider catColor={catColor} />}
+        {(keyDetails.length > 0 || sections.length > 0) && <NodeDivider catColor={catColor} />}
 
-        {/* ── Key insights grid ── */}
-        {keyDetails.length > 0 && (
+        {/* ── Content sections (new) or legacy insights grid ── */}
+        {!isLegacy && sections.length > 0 && (
+          <View style={styles.sectionsContainer}>
+            {sections.map((section, i) => (
+              <SectionBlock
+                key={i}
+                section={section}
+                catColor={catColor}
+                baseDelay={280 + i * 80}
+              />
+            ))}
+          </View>
+        )}
+        {isLegacy && keyDetails.length > 0 && (
           <Animated.View style={insightsCrystal}>
             <Text style={styles.sectionLabel}>Insights</Text>
             <View style={styles.insightGrid}>
@@ -322,7 +476,7 @@ export default function DetailScreen() {
         )}
 
         {/* ── Node divider ── */}
-        {entry.video_transcript && <NodeDivider catColor={catColor} />}
+        {entry.video_transcript && (keyDetails.length > 0 || sections.length > 0) && <NodeDivider catColor={catColor} />}
 
         {/* ── Transcript ── */}
         {entry.video_transcript && (
@@ -421,6 +575,69 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     marginBottom: 12,
   },
+
+  // Content type badge
+  typeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surface,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  typeLabel: {
+    ...typography.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    textTransform: 'capitalize',
+  },
+
+  // Sections container
+  sectionsContainer: { gap: 28 },
+
+  // Ordered section (steps/timeline)
+  orderedSection: { gap: 0 },
+  orderedItem: { flexDirection: 'row', gap: 14, minHeight: 44 },
+  stepConnector: { alignItems: 'center', width: 28 },
+  stepCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stepNumber: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  stepLine: { flex: 1, width: 2, marginVertical: 4 },
+  orderedText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 14,
+    lineHeight: 21,
+    paddingTop: 4,
+    paddingBottom: 12,
+  },
+
+  // Unordered section (bullets)
+  unorderedSection: { gap: 10 },
+  unorderedItem: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+  bulletDot: { width: 6, height: 6, borderRadius: 3, marginTop: 7 },
+  unorderedText: { flex: 1, color: colors.text, fontSize: 14, lineHeight: 21 },
+
+  // Single section (prominent block)
+  singleBlock: {
+    flexDirection: 'row',
+    gap: 14,
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.sm,
+  },
+  singleBar: { width: 5, borderRadius: 3 },
+  singleText: { flex: 1, color: colors.text, fontSize: 15, lineHeight: 24, fontWeight: '500' },
 
   // Insight grid
   insightGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },

@@ -65,7 +65,8 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
           duration REAL,
           view_count INTEGER,
           like_count INTEGER,
-          published_at TEXT
+          published_at TEXT,
+          content_type TEXT
         );
       `);
     }
@@ -79,6 +80,7 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
       ['view_count', 'INTEGER'],
       ['like_count', 'INTEGER'],
       ['published_at', 'TEXT'],
+      ['content_type', 'TEXT'],
     ];
     for (const [col, type] of metadataColumns) {
       try {

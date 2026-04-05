@@ -54,7 +54,8 @@ export async function handleBackgroundResult(event: {
       summary: result.summary,
       category: result.category,
       tags: JSON.stringify(result.tags),
-      key_details: JSON.stringify(result.keyDetails),
+      key_details: JSON.stringify(result.sections || result.keyDetails),
+      content_type: result.contentType || null,
       processing_status: 'completed',
       processed_at: new Date().toISOString(),
       ...(result.metadata ? {
@@ -67,7 +68,7 @@ export async function handleBackgroundResult(event: {
         published_at: result.metadata.publishedAt,
       } : {}),
     });
-    console.log(`[processing] completed entryId=${entryId} title="${result.title}"`);
+    console.log(`[processing] completed entryId=${entryId} title="${result.title}" contentType="${result.contentType}"`);
   } catch (err) {
     console.error(`[processing] failed to parse result entryId=${entryId}:`, err);
     await updateEntry(entryId, { processing_status: 'failed' });
@@ -106,7 +107,8 @@ export async function processEntry(entryId: string): Promise<void> {
         summary: result.summary,
         category: result.category,
         tags: JSON.stringify(result.tags),
-        key_details: JSON.stringify(result.keyDetails),
+        key_details: JSON.stringify(result.sections || result.keyDetails),
+        content_type: result.contentType || null,
         processing_status: 'completed',
         processed_at: new Date().toISOString(),
         ...(result.metadata ? {
@@ -119,7 +121,7 @@ export async function processEntry(entryId: string): Promise<void> {
           published_at: result.metadata.publishedAt,
         } : {}),
       });
-      console.log(`[processing] completed entryId=${entryId} title="${result.title}"`);
+      console.log(`[processing] completed entryId=${entryId} title="${result.title}" contentType="${result.contentType}"`);
     } catch (err) {
       console.error(`[processing] failed entryId=${entryId}:`, err);
       await updateEntry(entryId, { processing_status: 'failed' });

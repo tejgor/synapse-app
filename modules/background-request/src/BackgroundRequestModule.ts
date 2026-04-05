@@ -7,13 +7,11 @@ export interface BackgroundRequestResult {
   statusCode?: number;
 }
 
-interface BackgroundRequestModuleType {
+const mod = requireNativeModule('ExpoBackgroundRequest') as {
   startRequest(entryId: string, url: string, bodyJson: string): void;
   getPendingResults(): BackgroundRequestResult[];
   clearResult(entryId: string): void;
   getInFlightEntryIds(): string[];
-}
-
-const mod = requireNativeModule<BackgroundRequestModuleType>('ExpoBackgroundRequest');
-export const emitter = new EventEmitter(mod);
+};
+export const emitter = new EventEmitter(mod as any);
 export default mod;

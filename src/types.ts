@@ -6,6 +6,17 @@ export interface KeyDetail {
   value: string;
 }
 
+export interface ContentItem {
+  label?: string;  // for key-value style
+  text: string;
+}
+
+export interface ContentSection {
+  heading: string;       // e.g. "Steps", "Pros", "Ingredients", "At a Glance"
+  style: 'ordered' | 'unordered' | 'key-value' | 'single';
+  items: ContentItem[];
+}
+
 export interface Entry {
   id: string;
   title: string | null;
@@ -16,6 +27,7 @@ export interface Entry {
   source_url: string;
   source_platform: SourcePlatform;
   video_transcript: string | null;
+  content_type: string | null;
   processing_status: ProcessingStatus;
   created_at: string;
   processed_at: string | null;
@@ -47,5 +59,7 @@ export interface ProcessResponse {
   category: string;
   tags: string[];
   keyDetails: KeyDetail[];
+  contentType: string;
+  sections: ContentSection[];
   metadata: VideoMetadata | null;
 }

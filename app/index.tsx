@@ -81,7 +81,12 @@ function HeroCard({
   const catColor = entry.category ? categoryColor(entry.category) : colors.accent;
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
-  const keyDetails = entry.key_details ? JSON.parse(entry.key_details) : [];
+  const isLegacyEntry = !entry.content_type;
+  const keyDetails = isLegacyEntry && entry.key_details ? JSON.parse(entry.key_details) : [];
+  const sections = !isLegacyEntry && entry.key_details ? JSON.parse(entry.key_details) : [];
+  const totalItems = isLegacyEntry
+    ? keyDetails.length
+    : sections.reduce((sum: number, s: { items: unknown[] }) => sum + s.items.length, 0);
   const tags: string[] = entry.tags ? JSON.parse(entry.tags) : [];
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric',
@@ -132,12 +137,22 @@ function HeroCard({
         )}
 
         {/* Stats row */}
-        {(keyDetails.length > 0 || tags.length > 0) && !isProcessing && (
+        {(totalItems > 0 || tags.length > 0 || entry.content_type) && !isProcessing && (
           <View style={styles.heroStatsRow}>
-            {keyDetails.length > 0 && (
-              <Text style={styles.heroStat}>{keyDetails.length} insights</Text>
+            {entry.content_type && (
+              <>
+                <Text style={styles.heroStat}>{entry.content_type}</Text>
+                {(totalItems > 0 || tags.length > 0) && (
+                  <Text style={styles.heroStatSep}>·</Text>
+                )}
+              </>
             )}
-            {keyDetails.length > 0 && tags.length > 0 && (
+            {totalItems > 0 && (
+              <Text style={styles.heroStat}>
+                {isLegacyEntry ? `${totalItems} insights` : `${totalItems} details`}
+              </Text>
+            )}
+            {totalItems > 0 && tags.length > 0 && (
               <Text style={styles.heroStatSep}>·</Text>
             )}
             {tags.length > 0 && (

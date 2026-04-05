@@ -146,7 +146,7 @@ export default function CaptureScreen() {
       const id = randomUUID();
       await createEntry({
         id, title: null, summary: null, category: null, tags: null,
-        key_details: null, source_url: url, source_platform: platform,
+        key_details: null, content_type: null, source_url: url, source_platform: platform,
         video_transcript: null, processing_status: 'pending',
         created_at: new Date().toISOString(),
         author_name: null, author_username: null, thumbnail_url: null,

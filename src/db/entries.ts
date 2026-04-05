@@ -6,8 +6,8 @@ export async function createEntry(entry: Omit<Entry, 'processed_at'>): Promise<v
   await db.runAsync(
     `INSERT INTO entries (id, title, summary, category, tags, key_details, source_url, source_platform,
       video_transcript, processing_status, created_at, processed_at,
-      author_name, author_username, thumbnail_url, duration, view_count, like_count, published_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      author_name, author_username, thumbnail_url, duration, view_count, like_count, published_at, content_type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     entry.id,
     entry.title,
     entry.summary,
@@ -27,6 +27,7 @@ export async function createEntry(entry: Omit<Entry, 'processed_at'>): Promise<v
     entry.view_count ?? null,
     entry.like_count ?? null,
     entry.published_at ?? null,
+    entry.content_type ?? null,
   );
 }
 
@@ -65,7 +66,7 @@ export async function getEntryById(id: string): Promise<Entry | null> {
 
 export async function updateEntry(
   id: string,
-  fields: Partial<Pick<Entry, 'title' | 'summary' | 'category' | 'tags' | 'key_details' | 'video_transcript' | 'processing_status' | 'processed_at' | 'author_name' | 'author_username' | 'thumbnail_url' | 'duration' | 'view_count' | 'like_count' | 'published_at'>>
+  fields: Partial<Pick<Entry, 'title' | 'summary' | 'category' | 'tags' | 'key_details' | 'video_transcript' | 'processing_status' | 'processed_at' | 'author_name' | 'author_username' | 'thumbnail_url' | 'duration' | 'view_count' | 'like_count' | 'published_at' | 'content_type'>>
 ): Promise<void> {
   const db = await getDatabase();
   const sets: string[] = [];

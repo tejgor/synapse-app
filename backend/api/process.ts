@@ -36,6 +36,17 @@ interface SupadataMetadataResponse {
   createdAt: string | null;
 }
 
+interface ContentItem {
+  label?: string;
+  text: string;
+}
+
+interface ContentSection {
+  heading: string;
+  style: 'ordered' | 'unordered' | 'key-value' | 'single';
+  items: ContentItem[];
+}
+
 interface ProcessResponse {
   videoTranscript: string | null;
   title: string;
@@ -43,31 +54,34 @@ interface ProcessResponse {
   category: string;
   tags: string[];
   keyDetails: KeyDetail[];
+  contentType: string;
+  sections: ContentSection[];
   metadata: VideoMetadata | null;
 }
 
 const SUPADATA_TIMEOUT_MS = 90_000;
+const SUPADATA_RETRY_TIMEOUT_MS = 150_000;
 const CLAUDE_TIMEOUT_MS = 60_000;
 
 function log(step: string, detail: string) {
   console.log(`[process] ${step}: ${detail}`);
 }
 
-function supadataAbort(label: string): AbortSignal {
+function supadataAbort(timeoutMs: number = SUPADATA_TIMEOUT_MS): AbortSignal {
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), SUPADATA_TIMEOUT_MS);
+  setTimeout(() => controller.abort(), timeoutMs);
   return controller.signal;
 }
 
-async function fetchTranscript(videoUrl: string, isYouTube: boolean, apiKey: string): Promise<string> {
+async function fetchTranscript(videoUrl: string, isYouTube: boolean, apiKey: string, timeoutMs: number = SUPADATA_TIMEOUT_MS): Promise<string> {
   const endpoint = isYouTube
     ? `https://api.supadata.ai/v1/youtube/transcript?url=${encodeURIComponent(videoUrl)}`
     : `https://api.supadata.ai/v1/transcript?url=${encodeURIComponent(videoUrl)}&text=true`;
 
-  log('transcript', `fetching from Supadata (${isYouTube ? 'youtube' : 'generic'})...`);
+  log('transcript', `fetching from Supadata (${isYouTube ? 'youtube' : 'generic'}, timeout=${timeoutMs / 1000}s)...`);
   const transcriptRes = await fetch(endpoint, {
     headers: { 'x-api-key': apiKey },
-    signal: supadataAbort('transcript'),
+    signal: supadataAbort(timeoutMs),
   });
 
   if (!transcriptRes.ok) {
@@ -100,7 +114,7 @@ async function fetchMetadata(videoUrl: string, apiKey: string): Promise<VideoMet
     log('metadata', 'fetching from Supadata...');
     const res = await fetch(
       `https://api.supadata.ai/v1/metadata?url=${encodeURIComponent(videoUrl)}`,
-      { headers: { 'x-api-key': apiKey }, signal: supadataAbort('metadata') }
+      { headers: { 'x-api-key': apiKey }, signal: supadataAbort() }
     );
     if (!res.ok) {
       log('metadata', `FAILED — ${res.status} (non-blocking)`);
@@ -155,14 +169,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     fetchMetadata(videoUrl, supadataKey),
   ]);
 
+  let transcript: string;
   if (transcriptResult.status === 'rejected') {
     const reason = transcriptResult.reason;
-    const msg = reason?.name === 'AbortError' ? `Transcript fetch timed out (${SUPADATA_TIMEOUT_MS / 1000}s)` : (reason instanceof Error ? reason.message : 'Transcript fetch failed');
-    log('transcript', `FAILED — ${msg}`);
-    return res.status(422).json({ error: msg });
+    const firstMsg = reason?.name === 'AbortError' ? `Transcript fetch timed out (${SUPADATA_TIMEOUT_MS / 1000}s)` : (reason instanceof Error ? reason.message : 'Transcript fetch failed');
+    log('transcript', `FAILED — ${firstMsg} — retrying with ${SUPADATA_RETRY_TIMEOUT_MS / 1000}s timeout...`);
+
+    try {
+      transcript = await fetchTranscript(videoUrl, isYouTube, supadataKey, SUPADATA_RETRY_TIMEOUT_MS);
+    } catch (retryErr: any) {
+      const msg = retryErr?.name === 'AbortError' ? `Transcript fetch timed out on retry (${SUPADATA_RETRY_TIMEOUT_MS / 1000}s)` : (retryErr instanceof Error ? retryErr.message : 'Transcript fetch failed');
+      log('transcript', `RETRY FAILED — ${msg}`);
+      return res.status(422).json({ error: msg });
+    }
+  } else {
+    transcript = transcriptResult.value;
   }
 
-  const transcript = transcriptResult.value;
   const metadata = metadataResult.status === 'fulfilled' ? metadataResult.value : null;
 
   // Step 2: Extract knowledge via Claude
@@ -185,7 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
+        max_tokens: 2048,
         messages: [{ role: 'user', content: buildKnowledgePrompt(transcript, videoUrl, metadata ?? undefined) }],
       }),
       signal: claudeAbort.signal,
@@ -214,6 +237,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(422).json({ error: 'AI extraction returned invalid data' });
     }
 
+    // Build sections: prefer new format, fall back to wrapping legacy keyDetails
+    let sections: ContentSection[] = (parsed.sections as ContentSection[]) || [];
+    let contentType: string = (parsed.contentType as string) || 'general';
+
+    if (sections.length === 0 && Array.isArray(parsed.keyDetails) && parsed.keyDetails.length > 0) {
+      // Legacy fallback: wrap flat keyDetails into a single key-value section
+      contentType = 'general';
+      sections = [{
+        heading: 'Details',
+        style: 'key-value',
+        items: (parsed.keyDetails as KeyDetail[]).map((kd) => ({ label: kd.label, text: kd.value })),
+      }];
+    }
+
     const result: ProcessResponse = {
       videoTranscript: transcript,
       title: parsed.title as string,
@@ -221,10 +258,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       category: (parsed.category as string) || 'General',
       tags: (parsed.tags as string[]) || [],
       keyDetails: (parsed.keyDetails as KeyDetail[]) || [],
+      contentType,
+      sections,
       metadata,
     };
 
-    log('done', `title="${result.title}" category="${result.category}" tags=${result.tags.length} keyDetails=${result.keyDetails.length} hasMetadata=${metadata !== null}`);
+    log('done', `title="${result.title}" category="${result.category}" contentType="${result.contentType}" sections=${result.sections.length} hasMetadata=${metadata !== null}`);
     return res.status(200).json(result);
   } catch (err: any) {
     const msg = err?.name === 'AbortError'
@@ -244,22 +283,42 @@ function buildKnowledgePrompt(
     ? `\nVideo metadata:${metadata.originalTitle ? `\n- Title: ${metadata.originalTitle}` : ''}${metadata.authorName ? `\n- Creator: ${metadata.authorName}` : ''}${metadata.description ? `\n- Description: ${metadata.description.slice(0, 500)}` : ''}\n`
     : '';
 
-  return `You are a knowledge extraction assistant. Given a video transcript, extract structured knowledge that is genuinely useful and easy to reference later.
+  return `You are a knowledge extraction assistant. Given a video transcript, extract structured, actionable knowledge — not just a summary, but something genuinely useful to reference later.
 ${metaBlock}
 Transcript:
 ${videoTranscript}
 
 Source URL: ${sourceUrl}
 
-Extract the following:
-- title: A concise, descriptive title (5-10 words) capturing what this video teaches
-- summary: The core takeaway in 2-3 sentences. What would someone need to know?
-- category: One primary category. First try to assign to one of these: Tool, Resource, Technique, Concept, Recommendation, Tutorial, News, Opinion. If none fit well, create a short descriptive category (1-2 words).
-- tags: 3-6 lowercase tags for searchability. Include specific names, topics, and themes mentioned.
-- keyDetails: A list of structured detail items, each with a "label" and "value". Extract every concrete, useful piece of information: tool names, URLs mentioned, specific techniques, steps, numbers, recommendations, people or companies mentioned, pricing, alternatives, etc. Aim for 3-10 items. Labels should be short (1-3 words): "Tool", "Use case", "URL", "Author", "Step 1", "Cost", "Alternative", "Platform", etc.
+STEP 1 — Classify the content type. Choose the best fit or create your own short label (1-2 words):
+Common types: Tutorial, Review, Quick Tip, Recipe, Explainer, Resource List, Opinion, Comparison, Walkthrough, Demo, News, Story
 
-Respond with ONLY valid JSON in this exact format, no other text:
-{"title":"...","summary":"...","category":"...","tags":["tag1","tag2"],"keyDetails":[{"label":"...","value":"..."}]}`;
+STEP 2 — Extract these fields:
+- title: Concise, descriptive (5-10 words)
+- summary: Core takeaway in 2-3 sentences
+- category: One primary topic category (1-2 words, e.g. "Productivity", "Cooking", "Web Dev")
+- tags: 3-6 lowercase tags for searchability
+- contentType: The type from Step 1
+- sections: An array of structured sections appropriate for the content. Each section has:
+  - heading: Short label (e.g. "Steps", "Pros", "Ingredients", "At a Glance")
+  - style: One of "ordered", "unordered", "key-value", "single"
+  - items: Array of objects with "text" (required) and optional "label" (for key-value style)
+
+SECTION STYLES:
+- "ordered": Numbered list — use for steps, instructions, sequences
+- "unordered": Bullet list — use for pros, cons, tips, ingredients, resources
+- "key-value": Label + value pairs — use for specs, metadata, at-a-glance info (include "label" on each item)
+- "single": One prominent text block — use for the core tip, verdict, main takeaway
+
+GUIDELINES:
+- Choose sections that fit THIS content. A tutorial needs steps; a review needs pros/cons; a tip needs the tip front and center.
+- Include an "At a Glance" key-value section when useful (difficulty, time, cost, servings, etc.)
+- Extract EVERY concrete, actionable detail: tool names, URLs, techniques, numbers, recommendations, pricing.
+- Aim for 2-5 sections total. Each section should have a clear purpose.
+- For steps/instructions, make each item a complete actionable sentence.
+
+Respond with ONLY valid JSON:
+{"title":"...","summary":"...","category":"...","tags":["..."],"contentType":"Tutorial","sections":[{"heading":"Steps","style":"ordered","items":[{"text":"..."}]},{"heading":"At a Glance","style":"key-value","items":[{"label":"Difficulty","text":"Beginner"}]}]}`;
 }
 
 function extractJSON(raw: string): Record<string, unknown> | null {
@@ -273,8 +332,8 @@ function extractJSON(raw: string): Record<string, unknown> | null {
     // Fall through to extraction strategies
   }
 
-  // Try to extract first {...} block containing "keyDetails" or "title"
-  const jsonMatch = text.match(/\{[\s\S]*?"(?:keyDetails|title)"[\s\S]*?\}/);
+  // Try to extract first {...} block containing recognizable fields
+  const jsonMatch = text.match(/\{[\s\S]*?"(?:keyDetails|sections|contentType|title)"[\s\S]*?\}/);
   if (jsonMatch) {
     try {
       return JSON.parse(jsonMatch[0]) as Record<string, unknown>;
