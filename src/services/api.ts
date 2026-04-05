@@ -2,7 +2,7 @@ import type { ProcessResponse, SourcePlatform } from '../types';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
-const REQUEST_TIMEOUT_MS = 25_000;
+const REQUEST_TIMEOUT_MS = 60_000;
 
 export async function processEntry(
   videoUrl: string,
@@ -21,7 +21,7 @@ export async function processEntry(
     });
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      throw new Error('Request timed out after 25s');
+      throw new Error('Request timed out after 60s');
     }
     throw err;
   } finally {

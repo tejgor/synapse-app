@@ -149,6 +149,8 @@ export default function CaptureScreen() {
         key_details: null, source_url: url, source_platform: platform,
         video_transcript: null, processing_status: 'pending',
         created_at: new Date().toISOString(),
+        author_name: null, author_username: null, thumbnail_url: null,
+        duration: null, view_count: null, like_count: null, published_at: null,
       });
       processEntry(id);
 

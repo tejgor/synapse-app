@@ -1,8 +1,9 @@
 import React, { useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Pressable } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import ReanimatedSwipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Ionicons } from '@expo/vector-icons';
-import ReAnimated from 'react-native-reanimated';
+import ReAnimated, { useAnimatedStyle, interpolate, Extrapolation } from 'react-native-reanimated';
+import type { SharedValue } from 'react-native-reanimated';
 import {
   colors, borderRadius, spacing, shadows, typography, categoryColor, categoryTint, platformColors,
 } from '../constants/theme';
@@ -11,6 +12,23 @@ import { useCrystallizeStaggered } from '../utils/useCrystallize';
 import type { Entry } from '../types';
 
 const AnimatedPressable = ReAnimated.createAnimatedComponent(Pressable);
+
+function DeleteAction({ drag, onPress, style }: {
+  drag: SharedValue<number>;
+  onPress: () => void;
+  style: object;
+}) {
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(drag.value, [-80, 0], [1, 0.8], Extrapolation.CLAMP) }],
+  }));
+  return (
+    <Pressable style={style} onPress={onPress}>
+      <ReAnimated.View style={animStyle}>
+        <Ionicons name="trash-outline" size={17} color="white" />
+      </ReAnimated.View>
+    </Pressable>
+  );
+}
 
 export type CardVariant = 'standard' | 'compact';
 
@@ -37,7 +55,7 @@ function ProcessingDot() {
 export function EntryCard({
   entry, onPress, onDelete, onCategoryPress, index = 0, variant = 'standard',
 }: EntryCardProps) {
-  const swipeableRef = useRef<Swipeable>(null);
+  const swipeableRef = useRef<SwipeableMethods>(null);
   const crystalStyle = useCrystallizeStaggered(index);
   const { animatedStyle: pressStyle, onPressIn, onPressOut } = usePressAnimation(0.975);
 
@@ -52,30 +70,19 @@ export function EntryCard({
   const catTint = entry.category ? categoryTint(entry.category) : 'transparent';
   const platformIcon = PLATFORM_ICONS[entry.source_platform] as any;
 
-  const renderRightActions = (
-    _progress: Animated.AnimatedInterpolation<number>,
-    dragX: Animated.AnimatedInterpolation<number>
-  ) => {
-    const scale = dragX.interpolate({
-      inputRange: [-80, 0], outputRange: [1, 0.8], extrapolate: 'clamp',
-    });
-    return (
-      <Pressable
-        style={styles.deleteAction}
-        onPress={() => { swipeableRef.current?.close(); onDelete?.(); }}
-      >
-        <Animated.View style={{ transform: [{ scale }] }}>
-          <Ionicons name="trash-outline" size={17} color={colors.text} />
-        </Animated.View>
-      </Pressable>
-    );
-  };
+  const renderRightActions = (_progress: SharedValue<number>, drag: SharedValue<number>) => (
+    <DeleteAction
+      drag={drag}
+      style={styles.deleteAction}
+      onPress={() => { swipeableRef.current?.close(); onDelete?.(); }}
+    />
+  );
 
   // ── Compact variant ──────────────────────────────────────────────────────
   if (variant === 'compact') {
     return (
       <ReAnimated.View style={[styles.compactWrapper, crystalStyle]}>
-        <Swipeable
+        <ReanimatedSwipeable
           ref={swipeableRef}
           renderRightActions={renderRightActions}
           rightThreshold={40}
@@ -98,7 +105,7 @@ export function EntryCard({
               <Text style={styles.compactDate}>{date}</Text>
             </View>
           </AnimatedPressable>
-        </Swipeable>
+        </ReanimatedSwipeable>
       </ReAnimated.View>
     );
   }
@@ -106,7 +113,7 @@ export function EntryCard({
   // ── Standard variant ─────────────────────────────────────────────────────
   return (
     <ReAnimated.View style={[styles.standardWrapper, crystalStyle]}>
-      <Swipeable
+      <ReanimatedSwipeable
         ref={swipeableRef}
         renderRightActions={renderRightActions}
         rightThreshold={40}
@@ -145,16 +152,22 @@ export function EntryCard({
               <Text style={styles.summary} numberOfLines={2}>{entry.summary}</Text>
             ) : null}
 
-            {/* Footer: platform + date */}
+            {/* Footer: platform + author + date */}
             <View style={styles.footer}>
               {platformIcon && (
                 <Ionicons name={platformIcon} size={11} color={colors.textPlaceholder} />
+              )}
+              {entry.author_name != null && (
+                <>
+                  <Text style={styles.authorText} numberOfLines={1}>{entry.author_name}</Text>
+                  <Text style={styles.footerSep}>·</Text>
+                </>
               )}
               <Text style={styles.date}>{date}</Text>
             </View>
           </View>
         </AnimatedPressable>
-      </Swipeable>
+      </ReanimatedSwipeable>
     </ReAnimated.View>
   );
 }
@@ -230,6 +243,17 @@ const styles = StyleSheet.create({
     ...typography.mono,
     color: colors.textPlaceholder,
   },
+  authorText: {
+    ...typography.mono,
+    color: colors.textPlaceholder,
+    fontSize: 10,
+    maxWidth: 120,
+  },
+  footerSep: {
+    ...typography.mono,
+    color: colors.textPlaceholder,
+    fontSize: 10,
+  },
   failedText: { color: colors.error, fontSize: 13 },
   processingDot: {
     width: 8,
@@ -241,10 +265,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.error,
     justifyContent: 'center',
     alignItems: 'center',
-    width: 72,
+    width: 68,
     marginBottom: 10,
     borderRadius: 16,
-    marginRight: spacing.md,
+    marginLeft: 8,
   },
 
   // ── Compact ───────────────────────────────────────────────────────────────

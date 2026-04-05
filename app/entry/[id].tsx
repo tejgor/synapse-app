@@ -43,6 +43,18 @@ const PLATFORM_ICONS: Record<string, string> = {
   youtube: 'logo-youtube',
 };
 
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toString();
+}
+
 // ─── Ornamental divider ───────────────────────────────────────────────────────
 
 function NodeDivider({ catColor }: { catColor: string }) {
@@ -217,7 +229,43 @@ export default function DetailScreen() {
         )}
 
         {/* ── Date in SpaceMono ── */}
-        <Animated.Text style={[styles.date, dateCrystal]}>saved {date}</Animated.Text>
+        <Animated.Text style={[styles.date, dateCrystal]}>
+          {entry.published_at
+            ? `published ${new Date(entry.published_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} · saved ${date}`
+            : `saved ${date}`}
+        </Animated.Text>
+
+        {/* ── Video metadata row (author, duration, views, likes) ── */}
+        {(entry.author_name || entry.duration != null || entry.view_count != null || entry.like_count != null) && (
+          <Animated.View style={[styles.metaRow, dateCrystal]}>
+            {entry.author_name != null && (
+              <View style={styles.metaChip}>
+                <Ionicons name="person-outline" size={11} color={colors.textTertiary} />
+                <Text style={styles.metaText}>
+                  {entry.author_name}{entry.author_username ? ` @${entry.author_username}` : ''}
+                </Text>
+              </View>
+            )}
+            {entry.duration != null && entry.duration > 0 && (
+              <View style={styles.metaChip}>
+                <Ionicons name="time-outline" size={11} color={colors.textTertiary} />
+                <Text style={styles.metaText}>{formatDuration(entry.duration)}</Text>
+              </View>
+            )}
+            {entry.view_count != null && (
+              <View style={styles.metaChip}>
+                <Ionicons name="eye-outline" size={11} color={colors.textTertiary} />
+                <Text style={styles.metaText}>{formatCount(entry.view_count)} views</Text>
+              </View>
+            )}
+            {entry.like_count != null && (
+              <View style={styles.metaChip}>
+                <Ionicons name="heart-outline" size={11} color={colors.textTertiary} />
+                <Text style={styles.metaText}>{formatCount(entry.like_count)}</Text>
+              </View>
+            )}
+          </Animated.View>
+        )}
 
         {/* ── Summary as pull-quote with category-colored bar ── */}
         {entry.summary && (
@@ -326,6 +374,9 @@ const styles = StyleSheet.create({
     color: colors.textPlaceholder,
     marginTop: -4,
   },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: -6 },
+  metaChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  metaText: { ...typography.mono, color: colors.textTertiary, fontSize: 11 },
 
   // Pull-quote
   pullQuote: {

@@ -58,9 +58,34 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
           video_transcript TEXT,
           processing_status TEXT DEFAULT 'pending',
           created_at TEXT NOT NULL,
-          processed_at TEXT
+          processed_at TEXT,
+          author_name TEXT,
+          author_username TEXT,
+          thumbnail_url TEXT,
+          duration REAL,
+          view_count INTEGER,
+          like_count INTEGER,
+          published_at TEXT
         );
       `);
+    }
+
+    // Migrate: add metadata columns for existing installs
+    const metadataColumns: [string, string][] = [
+      ['author_name', 'TEXT'],
+      ['author_username', 'TEXT'],
+      ['thumbnail_url', 'TEXT'],
+      ['duration', 'REAL'],
+      ['view_count', 'INTEGER'],
+      ['like_count', 'INTEGER'],
+      ['published_at', 'TEXT'],
+    ];
+    for (const [col, type] of metadataColumns) {
+      try {
+        await db.execAsync(`SELECT ${col} FROM entries LIMIT 1`);
+      } catch {
+        await db.execAsync(`ALTER TABLE entries ADD COLUMN ${col} ${type}`);
+      }
     }
   }
   return db;

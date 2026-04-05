@@ -9,12 +9,16 @@ import {
   Alert,
   Pressable,
 } from 'react-native';
+import ReanimatedSwipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   interpolateColor,
+  interpolate,
+  Extrapolation,
 } from 'react-native-reanimated';
+import type { SharedValue } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import {
@@ -51,11 +55,29 @@ function groupEntries(entries: Entry[]) {
 // ─── Hero Card ────────────────────────────────────────────────────────────────
 // Structurally different from standard cards — no card bg, floating large text
 
+function HeroDeleteAction({ drag, onPress }: { drag: SharedValue<number>; onPress: () => void }) {
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(drag.value, [-80, 0], [1, 0.8], Extrapolation.CLAMP) }],
+  }));
+  return (
+    <Pressable style={styles.heroDeleteAction} onPress={onPress}>
+      <Animated.View style={animStyle}>
+        <Ionicons name="trash-outline" size={17} color={colors.text} />
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 function HeroCard({
   entry, onPress, onDelete,
 }: { entry: Entry; onPress: () => void; onDelete: () => void }) {
+  const swipeableRef = useRef<SwipeableMethods>(null);
   const { animatedStyle, onPressIn, onPressOut } = usePressAnimation(0.98);
   const crystalStyle = useCrystallize({ delay: 0, seed: 0 });
+
+  const renderRightActions = (_progress: SharedValue<number>, drag: SharedValue<number>) => (
+    <HeroDeleteAction drag={drag} onPress={() => { swipeableRef.current?.close(); onDelete(); }} />
+  );
   const catColor = entry.category ? categoryColor(entry.category) : colors.accent;
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
@@ -67,6 +89,12 @@ function HeroCard({
 
   return (
     <Animated.View style={[styles.heroWrapper, crystalStyle]}>
+      <ReanimatedSwipeable
+        ref={swipeableRef}
+        renderRightActions={renderRightActions}
+        rightThreshold={40}
+        overshootRight={false}
+      >
       <AnimatedPressable
         onPress={onPress}
         onPressIn={onPressIn}
@@ -118,6 +146,7 @@ function HeroCard({
           </View>
         )}
       </AnimatedPressable>
+      </ReanimatedSwipeable>
 
       {/* Bottom separator — visually ends the hero zone */}
       <View style={styles.heroSeparator} />
@@ -460,6 +489,7 @@ const styles = StyleSheet.create({
   },
   heroContent: {
     paddingVertical: 20,
+    paddingRight: 8,
     gap: 12,
   },
   heroMetaRow: {
@@ -521,6 +551,14 @@ const styles = StyleSheet.create({
   },
   heroStat: { ...typography.mono, color: colors.textPlaceholder, fontSize: 10 },
   heroStatSep: { color: colors.textPlaceholder, fontSize: 10 },
+  heroDeleteAction: {
+    backgroundColor: colors.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 72,
+    borderRadius: 12,
+    marginLeft: 12,
+  },
   heroSeparator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.borderSubtle,
