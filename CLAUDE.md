@@ -94,7 +94,7 @@ assets/                 Fonts, app icons, splash
 
 ### Backend (`backend/api/`)
 - `process.ts` — The only backend endpoint. Fetches transcript via Supadata, extracts knowledge via Claude Haiku. Contains `buildKnowledgePrompt()`, `extractJSON()`
-- `dev-server.ts` — Express 5 wrapper, port 3000, 50MB body limit
+- `dev-server.ts` — Express 5 wrapper, port 3002, 50MB body limit
 
 ---
 

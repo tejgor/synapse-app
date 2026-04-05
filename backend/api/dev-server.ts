@@ -10,7 +10,7 @@ app.post('/api/process', (req, res) => {
   handler(req as any, res as any);
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3002;
 const server = createServer(app);
 server.listen(PORT, () => {
   console.log(`Dev server running on http://localhost:${PORT}`);

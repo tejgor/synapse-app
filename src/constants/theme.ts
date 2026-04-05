@@ -1,14 +1,14 @@
 export const colors = {
-  // Backgrounds — warm dark layers
-  background: '#121210',
-  surface: '#1A1A17',
-  surfaceRaised: '#222220',
-  surfaceOverlay: '#2A2A27',
+  // Backgrounds — warm dark layers (high contrast between levels)
+  background: '#0A0A08',
+  surface: '#1C1B18',
+  surfaceRaised: '#282724',
+  surfaceOverlay: '#333230',
 
-  // Accent — muted lavender
-  accent: '#A78BDA',
-  accentMuted: '#8B72BA',
-  accentSubtle: 'rgba(167,139,218,0.12)',
+  // Accent — brighter lavender
+  accent: '#B49AE8',
+  accentMuted: '#9580CC',
+  accentSubtle: 'rgba(180,154,232,0.18)',
 
   // Secondary — sage green
   secondary: '#8BAF8B',
@@ -29,9 +29,9 @@ export const colors = {
   warningSubtle: 'rgba(201,168,92,0.12)',
 
   // Semantic
-  searchBg: '#1E1E1B',
-  border: '#2E2E2A',
-  borderSubtle: '#252522',
+  searchBg: '#161614',
+  border: '#3A3935',
+  borderSubtle: '#302F2B',
   separator: '#2A2A26',
 };
 
@@ -53,6 +53,9 @@ export const borderRadius = {
   xl: 28,
   full: 9999,
 };
+
+/** SpaceMono — used for metadata, labels, counts, stats */
+export const fontMono = 'SpaceMono';
 
 export const typography = {
   display: {
@@ -85,11 +88,19 @@ export const typography = {
     fontWeight: '500' as const,
     letterSpacing: 0.1,
   },
-  overline: {
+  /** Monospace — dates, counts, stats, platform labels */
+  mono: {
+    fontFamily: 'SpaceMono',
     fontSize: 11,
     lineHeight: 16,
-    fontWeight: '700' as const,
-    letterSpacing: 1.5,
+    letterSpacing: 0.2,
+  },
+  /** Section label — uppercase, monospace */
+  label: {
+    fontFamily: 'SpaceMono',
+    fontSize: 10,
+    lineHeight: 14,
+    letterSpacing: 1.8,
     textTransform: 'uppercase' as const,
   },
 };
@@ -97,31 +108,31 @@ export const typography = {
 export const shadows = {
   sm: {
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 3,
   },
   md: {
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 5,
   },
   lg: {
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 8,
+    shadowOpacity: 0.36,
+    shadowRadius: 20,
+    elevation: 10,
   },
   glow: {
-    shadowColor: '#A78BDA',
+    shadowColor: '#B49AE8',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
+    shadowOpacity: 0.45,
+    shadowRadius: 24,
+    elevation: 10,
   },
 };
 
@@ -138,3 +149,28 @@ export const animation = {
     snappy: { damping: 12, stiffness: 200, mass: 1 },
   },
 };
+
+export const platformColors: Record<string, string> = {
+  tiktok: '#ff0050',
+  instagram: '#E1306C',
+  youtube: '#FF0000',
+};
+
+// Deterministic category → accent hue. Returns an HSL color string.
+const CATEGORY_HUES = [
+  '#A78BDA', '#8BAF8B', '#C9A85C', '#6EAFAF', '#DA8BA7',
+  '#8B9FDA', '#AF8B6E', '#8BDAAF', '#DA8B8B', '#8BBFDA',
+];
+
+export function categoryColor(category: string): string {
+  let hash = 0;
+  for (let i = 0; i < category.length; i++) {
+    hash = category.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return CATEGORY_HUES[Math.abs(hash) % CATEGORY_HUES.length];
+}
+
+/** Returns a faint category-colored background tint for cards (8% opacity). */
+export function categoryTint(category: string): string {
+  return `${categoryColor(category)}14`;
+}

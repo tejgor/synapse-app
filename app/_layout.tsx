@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useShareIntentContext, ShareIntentProvider } from 'expo-share-intent';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useFonts } from 'expo-font';
 import { getDatabase } from '@/src/db/schema';
 import { retryFailedEntries } from '@/src/services/processing';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -27,13 +28,14 @@ function ShareIntentHandler() {
 export default function RootLayout() {
   const appState = useRef(AppState.currentState);
 
-  useEffect(() => {
-    // Initialize database and retry any pending entries on app launch
-    getDatabase().then(() => {
-      retryFailedEntries();
-    });
+  // Load SpaceMono for metadata/label typography
+  const [fontsLoaded] = useFonts({
+    'SpaceMono': require('../assets/fonts/SpaceMono-Regular.ttf'),
+  });
 
-    // Retry on foreground return — catches entries that didn't finish in the background
+  useEffect(() => {
+    getDatabase().then(() => { retryFailedEntries(); });
+
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (appState.current.match(/inactive|background/) && nextState === 'active') {
         retryFailedEntries();
@@ -59,21 +61,13 @@ export default function RootLayout() {
           headerShadowVisible: false,
         }}
       >
-        <Stack.Screen
-          name="index"
-          options={{ title: 'Synapse' }}
-        />
+        <Stack.Screen name="index" options={{ title: 'Synapse' }} />
         <Stack.Screen
           name="capture"
           options={{
-            title: 'Add',
-            presentation: 'modal',
-            animation: 'slide_from_bottom',
-            headerLeft: () => (
-              <Pressable onPress={() => router.back()}>
-                <Ionicons name="close" size={22} color={colors.textSecondary} />
-              </Pressable>
-            ),
+            headerShown: false,
+            presentation: 'transparentModal',
+            animation: 'fade',
           }}
         />
         <Stack.Screen

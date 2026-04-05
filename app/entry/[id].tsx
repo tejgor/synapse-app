@@ -7,61 +7,91 @@ import {
   StyleSheet,
   Linking,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withSpring,
   interpolate,
 } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, borderRadius, shadows, typography, animation } from '@/src/constants/theme';
-import { TopicTag } from '@/src/components/TopicTag';
-import { TagPill } from '@/src/components/TagPill';
-import { KeyDetailRow } from '@/src/components/KeyDetailRow';
+import {
+  colors, spacing, borderRadius, shadows, typography, animation, categoryColor, categoryTint,
+} from '@/src/constants/theme';
 import { getEntryById } from '@/src/db/entries';
 import type { Entry, KeyDetail } from '@/src/types';
 import { usePressAnimation } from '@/src/utils/animations';
+import { useCrystallize } from '@/src/utils/useCrystallize';
+import { SynapsePulse } from '@/src/components/SynapsePulse';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// 2-col grid: 24px margins each side + 12px gap
+const CARD_WIDTH = (SCREEN_WIDTH - spacing.lg * 2 - 12) / 2;
 
 const PLATFORM_LABELS: Record<string, string> = {
   tiktok: 'TikTok',
   instagram: 'Instagram Reels',
   youtube: 'YouTube',
 };
+const PLATFORM_ICONS: Record<string, string> = {
+  tiktok: 'logo-tiktok',
+  instagram: 'logo-instagram',
+  youtube: 'logo-youtube',
+};
 
-function SourceButton({ onPress, text, platform }: { onPress: () => void; text: string; platform: string }) {
-  const { animatedStyle, onPressIn, onPressOut } = usePressAnimation(0.975);
+// ─── Ornamental divider ───────────────────────────────────────────────────────
+
+function NodeDivider({ catColor }: { catColor: string }) {
   return (
-    <AnimatedPressable
-      style={[styles.sourceButton, animatedStyle]}
-      onPress={onPress}
-      onPressIn={onPressIn}
-      onPressOut={onPressOut}
-    >
-      <View>
-        <Text style={styles.sourceButtonText}>{text}</Text>
-        <Text style={styles.sourcePlatform}>{platform}</Text>
-      </View>
-      <Ionicons name="open-outline" size={16} color={colors.textTertiary} />
-    </AnimatedPressable>
+    <View style={styles.divider}>
+      <View style={styles.dividerLine} />
+      <View style={[styles.dividerNode, { backgroundColor: catColor }]} />
+      <View style={styles.dividerLine} />
+    </View>
   );
 }
 
+// ─── Insight mini-card ────────────────────────────────────────────────────────
+
+function InsightCard({
+  label, value, delay, catColor,
+}: { label: string; value: string; delay: number; catColor: string }) {
+  const crystalStyle = useCrystallize({ delay, seed: delay });
+  const isUrl = value.startsWith('http://') || value.startsWith('https://');
+  return (
+    <Animated.View style={[styles.insightCard, crystalStyle]}>
+      {/* Category-colored top accent — 4px, full opacity */}
+      <View style={[styles.insightAccent, { backgroundColor: catColor }]} />
+      <Text style={styles.insightLabel}>{label}</Text>
+      {isUrl ? (
+        <Pressable onPress={() => Linking.openURL(value)}>
+          <Text style={styles.insightLink} numberOfLines={2}>{value}</Text>
+        </Pressable>
+      ) : (
+        <Text style={styles.insightValue} numberOfLines={3}>{value}</Text>
+      )}
+    </Animated.View>
+  );
+}
+
+// ─── Transcript ───────────────────────────────────────────────────────────────
+
 function TranscriptSection({ transcript }: { transcript: string }) {
-  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const progress = useSharedValue(0);
 
   const toggle = useCallback(() => {
-    const next = !open;
-    setOpen(next);
+    const next = !expanded;
+    setExpanded(next);
     progress.value = withTiming(next ? 1 : 0, { duration: animation.duration.normal });
-  }, [open]);
+  }, [expanded]);
 
-  const animatedContentStyle = useAnimatedStyle(() => ({
-    maxHeight: interpolate(progress.value, [0, 1], [0, 4000]),
+  const expandStyle = useAnimatedStyle(() => ({
+    maxHeight: interpolate(progress.value, [0, 1], [0, 6000]),
     opacity: interpolate(progress.value, [0, 0.4, 1], [0, 0, 1]),
     overflow: 'hidden',
   }));
@@ -71,21 +101,57 @@ function TranscriptSection({ transcript }: { transcript: string }) {
   }));
 
   return (
-    <View style={styles.section}>
+    <View style={styles.transcriptWrapper}>
+      <View style={styles.transcriptPreviewBlock}>
+        <Text style={styles.transcriptText} numberOfLines={expanded ? undefined : 4}>
+          {transcript}
+        </Text>
+        {!expanded && <View style={styles.transcriptFade} pointerEvents="none" />}
+      </View>
       <Pressable style={styles.transcriptToggle} onPress={toggle}>
-        <Text style={styles.sectionTitle}>Transcript</Text>
+        <Text style={styles.transcriptToggleText}>
+          {expanded ? 'Collapse' : 'Read full transcript'}
+        </Text>
         <Animated.View style={chevronStyle}>
-          <Ionicons name="chevron-down" size={16} color={colors.textTertiary} />
+          <Ionicons name="chevron-down" size={13} color={colors.accentMuted} />
         </Animated.View>
       </Pressable>
-      <Animated.View style={animatedContentStyle}>
-        <View style={styles.transcriptCard}>
-          <Text style={styles.transcriptText}>{transcript}</Text>
-        </View>
+      <Animated.View style={expandStyle}>
+        <Text style={[styles.transcriptText, { marginTop: 12 }]}>{transcript}</Text>
       </Animated.View>
     </View>
   );
 }
+
+// ─── Floating source pill ─────────────────────────────────────────────────────
+
+function SourcePill({ url, platform }: { url: string; platform: string }) {
+  const { animatedStyle, onPressIn, onPressOut } = usePressAnimation(0.93);
+  const platformIcon = PLATFORM_ICONS[platform] as any;
+
+  return (
+    <View style={styles.pillAnchor}>
+      <SynapsePulse intensity="subtle" radius={99}>
+        <AnimatedPressable
+          style={[styles.sourcePill, animatedStyle]}
+          onPress={() => Linking.openURL(url)}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
+        >
+          {platformIcon && (
+            <Ionicons name={platformIcon} size={13} color={colors.textSecondary} style={{ marginRight: 6 }} />
+          )}
+          <Text style={styles.sourcePillText}>
+            {PLATFORM_LABELS[platform] || platform}
+          </Text>
+          <Ionicons name="open-outline" size={12} color={colors.textTertiary} style={{ marginLeft: 5 }} />
+        </AnimatedPressable>
+      </SynapsePulse>
+    </View>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function DetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -94,14 +160,20 @@ export default function DetailScreen() {
 
   useEffect(() => {
     if (!id) return;
-    getEntryById(id)
-      .then(setEntry)
-      .finally(() => setLoading(false));
+    getEntryById(id).then(setEntry).finally(() => setLoading(false));
   }, [id]);
+
+  // Crystallization delays for each section
+  const titleCrystal = useCrystallize({ delay: 80, seed: 1 });
+  const dateCrystal = useCrystallize({ delay: 120, seed: 2 });
+  const quoteCrystal = useCrystallize({ delay: 180, seed: 3 });
+  const tagsCrystal = useCrystallize({ delay: 230, seed: 4 });
+  const insightsCrystal = useCrystallize({ delay: 280, seed: 5 });
+  const transcriptCrystal = useCrystallize({ delay: 330, seed: 6 });
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={styles.loading}>
         <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
@@ -109,210 +181,246 @@ export default function DetailScreen() {
 
   if (!entry) {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.errorText}>Entry not found</Text>
+      <View style={styles.loading}>
+        <Text style={{ color: colors.textTertiary, fontSize: 15 }}>Entry not found</Text>
       </View>
     );
   }
 
   const tags: string[] = entry.tags ? JSON.parse(entry.tags) : [];
   const keyDetails: KeyDetail[] = entry.key_details ? JSON.parse(entry.key_details) : [];
-
+  const catColor = entry.category ? categoryColor(entry.category) : colors.accent;
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
 
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
+    month: 'long', day: 'numeric', year: 'numeric',
   });
 
-  const platformLabel = PLATFORM_LABELS[entry.source_platform] || entry.source_platform;
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerMeta}>
-          {entry.category && <TopicTag tag={entry.category} />}
-          <Text style={styles.date}>{date}</Text>
-        </View>
+    <View style={styles.outer}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+
+        {/* ── Category pill ── */}
+        {entry.category && (
+          <Animated.View style={[styles.catRow, dateCrystal]}>
+            <View style={[styles.catPill, { backgroundColor: `${catColor}22` }]}>
+              <View style={[styles.catDot, { backgroundColor: catColor }]} />
+              <Text style={[styles.catLabel, { color: catColor }]}>{entry.category}</Text>
+            </View>
+          </Animated.View>
+        )}
+
+        {/* ── Title — biggest element, crystallizes first ── */}
         {entry.title && (
-          <Text style={styles.title}>{entry.title}</Text>
+          <Animated.Text style={[styles.title, titleCrystal]}>{entry.title}</Animated.Text>
         )}
+
+        {/* ── Date in SpaceMono ── */}
+        <Animated.Text style={[styles.date, dateCrystal]}>saved {date}</Animated.Text>
+
+        {/* ── Summary as pull-quote with category-colored bar ── */}
         {entry.summary && (
-          <Text style={styles.summary}>{entry.summary}</Text>
+          <Animated.View style={[styles.pullQuote, { backgroundColor: categoryTint(entry.category || '') }, quoteCrystal]}>
+            <View style={[styles.pullBar, { backgroundColor: catColor }]} />
+            <Text style={styles.pullText}>{entry.summary}</Text>
+          </Animated.View>
         )}
+
+        {/* ── Tags ── */}
         {tags.length > 0 && (
-          <View style={styles.tagsRow}>
+          <Animated.View style={[styles.tagsRow, tagsCrystal]}>
             {tags.map((tag) => (
-              <TagPill key={tag} tag={tag} />
+              <View key={tag} style={styles.tagChip}>
+                <Text style={styles.tagText}>{tag}</Text>
+              </View>
             ))}
+          </Animated.View>
+        )}
+
+        {/* ── Processing / failed ── */}
+        {isProcessing && (
+          <View style={styles.banner}>
+            <ActivityIndicator size="small" color={colors.warning} />
+            <Text style={styles.bannerText}>Extracting knowledge...</Text>
           </View>
         )}
-      </View>
-
-      {/* Processing banner */}
-      {isProcessing && (
-        <View style={styles.processingBanner}>
-          <ActivityIndicator size="small" color={colors.warning} />
-          <Text style={styles.processingText}>Extracting knowledge...</Text>
-        </View>
-      )}
-
-      {entry.processing_status === 'failed' && (
-        <View style={[styles.processingBanner, styles.failedBanner]}>
-          <Text style={styles.failedText}>Processing failed. Try again later.</Text>
-        </View>
-      )}
-
-      {/* Key Details */}
-      {keyDetails.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Key Details</Text>
-          <View style={styles.detailsCard}>
-            {keyDetails.map((detail, index) => (
-              <React.Fragment key={index}>
-                {index > 0 && <View style={styles.detailDivider} />}
-                <KeyDetailRow label={detail.label} value={detail.value} />
-              </React.Fragment>
-            ))}
+        {entry.processing_status === 'failed' && (
+          <View style={[styles.banner, { backgroundColor: colors.errorSubtle }]}>
+            <Ionicons name="warning-outline" size={15} color={colors.error} />
+            <Text style={[styles.bannerText, { color: colors.error }]}>Processing failed.</Text>
           </View>
-        </View>
-      )}
+        )}
 
-      {/* Transcript (collapsible with animation) */}
-      {entry.video_transcript && (
-        <TranscriptSection transcript={entry.video_transcript} />
-      )}
+        {/* ── Node divider ── */}
+        {keyDetails.length > 0 && <NodeDivider catColor={catColor} />}
 
-      {/* Source link */}
-      <SourceButton
-        onPress={() => Linking.openURL(entry.source_url)}
-        text="View source"
-        platform={platformLabel}
-      />
-    </ScrollView>
+        {/* ── Key insights grid ── */}
+        {keyDetails.length > 0 && (
+          <Animated.View style={insightsCrystal}>
+            <Text style={styles.sectionLabel}>Insights</Text>
+            <View style={styles.insightGrid}>
+              {keyDetails.map((d: KeyDetail, i: number) => (
+                <InsightCard
+                  key={i}
+                  label={d.label}
+                  value={d.value}
+                  catColor={catColor}
+                  delay={280 + i * 60}
+                />
+              ))}
+            </View>
+          </Animated.View>
+        )}
+
+        {/* ── Node divider ── */}
+        {entry.video_transcript && <NodeDivider catColor={catColor} />}
+
+        {/* ── Transcript ── */}
+        {entry.video_transcript && (
+          <Animated.View style={transcriptCrystal}>
+            <Text style={styles.sectionLabel}>Transcript</Text>
+            <TranscriptSection transcript={entry.video_transcript} />
+          </Animated.View>
+        )}
+
+        <View style={{ height: 80 }} />
+      </ScrollView>
+
+      {/* ── Floating source pill ── */}
+      <SourcePill url={entry.source_url} platform={entry.source_platform} />
+    </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    padding: spacing.xl,
-    paddingBottom: 80,
-    gap: 40,
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  errorText: {
-    color: colors.textTertiary,
-    fontSize: 16,
-  },
-  header: {
-    gap: 20,
-  },
-  headerMeta: {
+  outer: { flex: 1, backgroundColor: colors.background },
+  scroll: { flex: 1 },
+  content: { paddingTop: spacing.lg, paddingHorizontal: spacing.lg, paddingBottom: 40, gap: 20 },
+  loading: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
+
+  // Header
+  catRow: { flexDirection: 'row', alignItems: 'center' },
+  catPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 5,
   },
-  date: {
-    color: colors.textTertiary,
-    ...typography.caption,
-  },
+  catDot: { width: 8, height: 8, borderRadius: 4 },
+  catLabel: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
   title: {
     color: colors.text,
-    ...typography.heading,
+    fontSize: 32,
+    fontWeight: '800',
+    lineHeight: 40,
+    letterSpacing: -0.6,
+    marginTop: 4,
   },
-  summary: {
-    color: colors.textSecondary,
-    ...typography.body,
+  date: {
+    ...typography.mono,
+    color: colors.textPlaceholder,
+    marginTop: -4,
   },
-  tagsRow: {
+
+  // Pull-quote
+  pullQuote: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs + 2,
-  },
-  processingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
+    gap: 14,
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
     ...shadows.sm,
+    marginTop: 4,
   },
-  failedBanner: {
-    backgroundColor: colors.errorSubtle,
+  pullBar: { width: 5, borderRadius: 3 },
+  pullText: { flex: 1, color: colors.textSecondary, fontSize: 15, lineHeight: 23 },
+
+  // Tags
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  tagChip: {
+    backgroundColor: colors.accentSubtle,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  processingText: {
-    color: colors.textSecondary,
-    ...typography.caption,
+  tagText: { color: colors.textTertiary, fontSize: 11, fontWeight: '500' },
+
+  // Banners
+  banner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.surface, borderRadius: borderRadius.md,
+    padding: spacing.md, ...shadows.sm,
   },
-  failedText: {
-    color: colors.error,
-    ...typography.caption,
-  },
-  section: {
-    gap: spacing.sm,
-  },
-  sectionTitle: {
+  bannerText: { color: colors.textSecondary, ...typography.caption },
+
+  // Divider
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.borderSubtle },
+  dividerNode: { width: 5, height: 5, borderRadius: 2.5, opacity: 0.45 },
+
+  // Section label
+  sectionLabel: {
+    ...typography.label,
     color: colors.textTertiary,
-    ...typography.overline,
+    marginBottom: 12,
   },
-  detailsCard: {
+
+  // Insight grid
+  insightGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  insightCard: {
+    width: CARD_WIDTH,
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: 20,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
     ...shadows.sm,
   },
-  detailDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.borderSubtle,
-    marginVertical: spacing.xs,
+  insightAccent: { height: 4 },
+  insightLabel: {
+    ...typography.label,
+    color: colors.textTertiary,
+    paddingHorizontal: 12,
+    paddingTop: 11,
+    paddingBottom: 5,
+  },
+  insightValue: {
+    color: colors.text, fontSize: 14, lineHeight: 20,
+    paddingHorizontal: 12, paddingBottom: 12,
+  },
+  insightLink: {
+    color: colors.accent, fontSize: 13, lineHeight: 18,
+    paddingHorizontal: 12, paddingBottom: 12,
+  },
+
+  // Transcript
+  transcriptWrapper: { gap: 0 },
+  transcriptPreviewBlock: { position: 'relative' },
+  transcriptText: { color: colors.textSecondary, fontSize: 13, lineHeight: 21 },
+  transcriptFade: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    height: 28, backgroundColor: colors.background, opacity: 0.88,
   },
   transcriptToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 10,
   },
-  transcriptCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: 20,
-    ...shadows.sm,
+  transcriptToggleText: { color: colors.accentMuted, fontSize: 12, fontWeight: '600' },
+
+  // Source pill
+  pillAnchor: { position: 'absolute', bottom: 26, alignSelf: 'center' },
+  sourcePill: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: 16, paddingVertical: 10,
+    ...shadows.md,
+    shadowOpacity: 0.28,
   },
-  transcriptText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  sourceButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    ...shadows.sm,
-  },
-  sourceButtonText: {
-    color: colors.accent,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  sourcePlatform: {
-    color: colors.textTertiary,
-    ...typography.caption,
-    marginTop: 2,
-  },
+  sourcePillText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
 });
