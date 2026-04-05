@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,8 @@ import {
 import { EntryCard } from '@/src/components/EntryCard';
 import { SynapsePulse } from '@/src/components/SynapsePulse';
 import { useEntries } from '@/src/hooks/useEntries';
-import { deleteEntry } from '@/src/db/entries';
+import { deleteEntry, updateEntry, clearAllEntries } from '@/src/db/entries';
+import { processEntry } from '@/src/services/processing';
 import {
   usePressAnimation, useEmptyStateEntrance, useSlideUp,
 } from '@/src/utils/animations';
@@ -91,6 +92,8 @@ function HeroCard({
               <Text style={styles.heroTitle} numberOfLines={3}>{entry.title}</Text>
             ) : isProcessing ? (
               <Text style={styles.heroProcessing}>Extracting knowledge...</Text>
+            ) : entry.processing_status === 'failed' ? (
+              <Text style={styles.heroFailed}>Analysis failed</Text>
             ) : null}
           </View>
         </View>
@@ -182,15 +185,30 @@ function SearchBar({ value, onChangeText }: { value: string; onChangeText: (t: s
 
 // ─── FAB ──────────────────────────────────────────────────────────────────────
 
-function FAB({ onPress }: { onPress: () => void }) {
+function FAB({ onPress, onLongPress }: { onPress: () => void; onLongPress: () => void }) {
   const { animatedStyle, onPressIn, onPressOut } = usePressAnimation(0.88);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handlePressIn = () => {
+    onPressIn();
+    holdTimer.current = setTimeout(onLongPress, 5000);
+  };
+
+  const handlePressOut = () => {
+    onPressOut();
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+    }
+  };
+
   return (
     <SynapsePulse intensity="strong" radius={borderRadius.xl}>
       <AnimatedPressable
         style={[styles.fab, animatedStyle]}
         onPress={onPress}
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
       >
         <Ionicons name="add" size={26} color={colors.text} />
       </AnimatedPressable>
@@ -252,8 +270,43 @@ export default function LibraryScreen() {
     ]);
   }, [refresh]);
 
-  const heroEntry = entries[0] ?? null;
-  const rest = entries.slice(1);
+  const handleClearAll = useCallback(() => {
+    Alert.alert(
+      'Clear all entries',
+      'This will permanently delete every entry in your local database. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete everything', style: 'destructive',
+          onPress: async () => { await clearAllEntries(); refresh(); },
+        },
+      ]
+    );
+  }, [refresh]);
+
+  const handleFailedPress = useCallback((id: string) => {
+    Alert.alert('Analysis failed', 'Would you like to retry or remove this entry?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove', style: 'destructive',
+        onPress: async () => { await deleteEntry(id); refresh(); },
+      },
+      {
+        text: 'Retry',
+        onPress: async () => {
+          await updateEntry(id, { processing_status: 'pending' });
+          refresh();
+          processEntry(id);
+        },
+      },
+    ]);
+  }, [refresh]);
+
+  const heroIndex = entries.findIndex((e) => e.processing_status === 'completed');
+  const heroEntry = heroIndex >= 0 ? entries[heroIndex] : null;
+  const rest = heroEntry
+    ? [...entries.slice(0, heroIndex), ...entries.slice(heroIndex + 1)]
+    : entries;
   const { today, thisWeek, earlier } = useMemo(() => groupEntries(rest), [rest]);
   const sections = useMemo<Section[]>(() => {
     const r: Section[] = [];
@@ -290,7 +343,11 @@ export default function LibraryScreen() {
               entry={item}
               index={index + 1}
               variant={(section as Section).variant}
-              onPress={() => router.push(`/entry/${item.id}`)}
+              onPress={() =>
+              item.processing_status === 'failed'
+                ? handleFailedPress(item.id)
+                : router.push(`/entry/${item.id}`)
+            }
               onCategoryPress={(cat) => setActiveCategory((c) => c === cat ? undefined : cat)}
               onDelete={() => handleDelete(item.id)}
             />
@@ -319,7 +376,11 @@ export default function LibraryScreen() {
               {!isSearching && heroEntry && (
                 <HeroCard
                   entry={heroEntry}
-                  onPress={() => router.push(`/entry/${heroEntry.id}`)}
+                  onPress={() =>
+                    heroEntry.processing_status === 'failed'
+                      ? handleFailedPress(heroEntry.id)
+                      : router.push(`/entry/${heroEntry.id}`)
+                  }
                   onDelete={() => handleDelete(heroEntry.id)}
                 />
               )}
@@ -341,7 +402,7 @@ export default function LibraryScreen() {
       )}
 
       <View style={styles.fabContainer}>
-        <FAB onPress={() => router.push('/capture')} />
+        <FAB onPress={() => router.push('/capture')} onLongPress={handleClearAll} />
       </View>
     </View>
   );
@@ -445,6 +506,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   heroProcessing: { color: colors.textTertiary, fontSize: 18, fontStyle: 'italic' },
+  heroFailed: { color: colors.error, fontSize: 18, fontStyle: 'italic' },
   heroSummary: {
     color: colors.textSecondary,
     fontSize: 16,

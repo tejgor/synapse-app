@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  Linking,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -45,6 +46,11 @@ const PLATFORM_ICONS: Record<SourcePlatform, string> = {
   tiktok: 'logo-tiktok',
   instagram: 'logo-instagram',
   youtube: 'logo-youtube',
+};
+const PLATFORM_SCHEMES: Record<SourcePlatform, string> = {
+  tiktok: 'tiktok://',
+  instagram: 'instagram://',
+  youtube: 'youtube://',
 };
 
 // ─── Ambient node — pulsing synapse orb in the backdrop ───────────────────────
@@ -104,6 +110,7 @@ function CheckmarkFlash({ visible }: { visible: boolean }) {
 
 export default function CaptureScreen() {
   const params = useLocalSearchParams<{ url?: string }>();
+  const isFromShare = !!params.url;
   const [url, setUrl] = useState(params.url || '');
   const [platform, setPlatform] = useState<SourcePlatform | null>(null);
   const [saving, setSaving] = useState(false);
@@ -150,7 +157,12 @@ export default function CaptureScreen() {
         setShowCheck(true);
         setTimeout(() => {
           backdropOpacity.value = withTiming(0, { duration: 280 });
-          setTimeout(() => router.back(), 280);
+          setTimeout(() => {
+            router.back();
+            if (isFromShare && platform) {
+              Linking.openURL(PLATFORM_SCHEMES[platform]);
+            }
+          }, 280);
         }, 620);
       });
     } catch (err) {

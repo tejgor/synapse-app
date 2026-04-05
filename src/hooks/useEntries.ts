@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getEntries } from '../db/entries';
+import { onProcessingUpdate } from '../services/processing';
 import type { Entry } from '../types';
 
 interface UseEntriesReturn {
@@ -26,6 +27,10 @@ export function useEntries(search?: string, category?: string): UseEntriesReturn
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    return onProcessingUpdate(refresh);
   }, [refresh]);
 
   return { entries, loading, refresh };

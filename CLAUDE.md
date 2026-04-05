@@ -30,18 +30,23 @@ iOS Share Sheet / Manual URL paste
         ↓
   SQLite entry created (status: pending)
         ↓
-  src/services/processing.ts  (fire-and-forget)
+  src/services/processing.ts  (fire-and-forget, iOS background task)
         ↓
   backend/api/process.ts  (Vercel serverless)
-    ├── Supadata API  →  video transcript (all platforms)
-    └── Anthropic Claude Haiku  →  title, summary, category, tags, keyDetails
+    ├── Supadata API  →  video transcript (returns 422 on failure)
+    └── Anthropic Claude Haiku  →  title, summary, category, tags, keyDetails (returns 422 on failure)
         ↓
-  SQLite entry updated (status: completed)
+  SQLite entry updated (status: completed | failed)
         ↓
   entry/[id].tsx  (detail view: title, summary, category, tags, key details, collapsible transcript)
 ```
 
-Retry on app launch: `_layout.tsx` calls `retryFailedEntries()` for any `pending`/`failed` entries.
+After save (share flow): `capture.tsx` calls `router.back()` then `Linking.openURL()` with the source
+app's scheme (`tiktok://`, `instagram://`, `youtube://`) to return the user to where they came from.
+
+Retry on app launch + foreground resume: `_layout.tsx` calls `retryFailedEntries()` for any `pending`/`failed`/stale-`processing` entries.
+
+Real-time UI updates: `processing.ts` fires an event via `onProcessingUpdate()` when any entry finishes (success or failure); `useEntries` subscribes and auto-refreshes.
 
 ---
 
@@ -68,9 +73,9 @@ assets/                 Fonts, app icons, splash
 ## Key Files
 
 ### Screens (`app/`)
-- `_layout.tsx` — Root Stack navigator, ShareIntentProvider, DB init, retry on launch
-- `index.tsx` — Library screen: search bar, category filter bar, FlatList of entry cards, FAB
-- `capture.tsx` — Add screen: URL paste, platform detection badge, save button
+- `_layout.tsx` — Root Stack navigator, ShareIntentProvider, DB init, retry on launch + foreground resume
+- `index.tsx` — Library screen: search bar, category filter bar, SectionList of entry cards, FAB. Hero slot is the most recent **completed** entry only. Failed entries show an alert with Retry/Remove instead of navigating to detail. Long-press FAB 5s → dev clear-all dialog.
+- `capture.tsx` — Add screen: URL paste, platform detection badge, save button. After save via share sheet, returns user to source app via `Linking.openURL(PLATFORM_SCHEMES[platform])`.
 - `entry/[id].tsx` — Detail: title, summary, category tag, tags, key details list, collapsible transcript, source link
 - `+native-intent.tsx` — Intercepts `synapse://dataUrl=...` deep links before Expo Router resolves them
 
@@ -81,19 +86,19 @@ assets/                 Fonts, app icons, splash
 - `KeyDetailRow.tsx` — Label + value row for key details; auto-links URL values via `Linking.openURL`
 
 ### Services (`src/services/`)
-- `api.ts` — `POST /api/process` HTTP client; reads `EXPO_PUBLIC_API_URL`
-- `processing.ts` — Orchestrates entry processing end-to-end; contains `retryFailedEntries()`
+- `api.ts` — `POST /api/process` HTTP client; reads `EXPO_PUBLIC_API_URL`; 25s `AbortController` timeout; throws on non-200
+- `processing.ts` — Orchestrates entry processing; wraps in iOS background task; fires `onProcessingUpdate()` event on completion/failure; contains `retryFailedEntries()`
 - `thumbnail.ts` — Platform detection only: `detectPlatform(url)` → `SourcePlatform | null`
 
 ### Data Layer (`src/db/`)
 - `schema.ts` — SQLite init, `entries` table DDL, migration for old schema (adds new columns, copies `video_url`→`source_url`)
-- `entries.ts` — `createEntry`, `getEntries` (search + category filter), `getEntryById`, `updateEntry`, `deleteEntry`, `getPendingEntries`, `getCategories`
+- `entries.ts` — `createEntry`, `getEntries` (search + category filter), `getEntryById`, `updateEntry`, `deleteEntry`, `getPendingEntries`, `getCategories`, `clearAllEntries`
 
 ### Hooks (`src/hooks/`)
-- `useEntries.ts` — Fetches entries with optional search text + category filter
+- `useEntries.ts` — Fetches entries with optional search text + category filter; subscribes to `onProcessingUpdate` for automatic refresh when processing completes
 
 ### Backend (`backend/api/`)
-- `process.ts` — The only backend endpoint. Fetches transcript via Supadata, extracts knowledge via Claude Haiku. Contains `buildKnowledgePrompt()`, `extractJSON()`
+- `process.ts` — The only backend endpoint. Fetches transcript via Supadata, extracts knowledge via Claude Haiku. Returns **422** if transcript fails or is empty, or if Claude returns unparseable JSON — never returns 200 with default/empty data. Structured `[process]` logs at each step. Contains `buildKnowledgePrompt()`, `extractJSON()`
 - `dev-server.ts` — Express 5 wrapper, port 3002, 50MB body limit
 
 ---
@@ -122,6 +127,8 @@ All AI logic is in `backend/api/process.ts`. Input: `{ videoUrl, platform }`.
 
 Single unified pipeline — no YouTube vs. TikTok/Instagram split. `max_tokens: 1024`.
 
+Both steps are hard failures: if the transcript is empty or the AI response can't be parsed, the endpoint returns 422 and the frontend marks the entry as `failed`. The frontend has a 25s request timeout (`AbortController`) to handle backgrounding — if exceeded, the entry is also marked `failed` and retried on next launch.
+
 ---
 
 ## Data Model
@@ -149,7 +156,7 @@ Both `tags` and `key_details` are stored as JSON strings in SQLite — parse wit
 
 **Styling:** `StyleSheet.create()` only. No CSS-in-JS libraries. All design tokens (colors, spacing, border radii) from `src/constants/theme.ts`. Dark theme forced via `app.json` (`userInterfaceStyle: "dark"`).
 
-**State management:** No Redux/Zustand/Context. Local `useState` in components + SQLite as source of truth. Use `useFocusEffect` to refresh data on screen focus.
+**State management:** No Redux/Zustand/Context. Local `useState` in components + SQLite as source of truth. Use `useFocusEffect` to refresh data on screen focus. Processing completion triggers real-time refresh via the `onProcessingUpdate` event emitter in `processing.ts`.
 
 **Routing:** Expo Router file-based. Params via `useLocalSearchParams()`. Modal screens use `animation: 'slide_from_bottom'` in `_layout.tsx`.
 
@@ -163,6 +170,7 @@ Both `tags` and `key_details` are stored as JSON strings in SQLite — parse wit
 - **iOS-focused** — Android config exists but primary dev/testing is iPhone via dev builds
 - **No cloud sync** — all data is local SQLite; uninstalling loses all entries
 - **Dev builds required** — Expo Go not supported (SDK 55 + native modules)
-- **Processing is fire-and-forget** — if the app is backgrounded immediately after capture, processing may not complete; retry runs on next launch
+- **Processing is fire-and-forget** — runs in an iOS background task (~30s budget). If the task is killed mid-flight, the entry stays at `processing` status; `retryFailedEntries()` resets and retries it on next foreground. The 25s client timeout ensures failures surface cleanly rather than hanging indefinitely.
+- **Background task singleton** — `modules/background-task/` tracks only one `UIBackgroundTaskIdentifier` at a time; concurrent `retryFailedEntries()` calls can leak identifiers if multiple entries are retried simultaneously
 - **App group:** `group.io.synapse.app` — required for share extension ↔ main app communication
 - **After removing packages** (`expo-audio`, `expo-haptics`, `react-native-youtube-iframe`, `react-native-webview`), run `npx expo prebuild --clean` to regenerate the native project

@@ -89,7 +89,7 @@ export function EntryCard({
           >
             <View style={[styles.compactDot, { backgroundColor: catColor }]} />
             <Text style={styles.compactTitle} numberOfLines={1}>
-              {entry.title || (isProcessing ? 'Extracting knowledge...' : 'Untitled')}
+              {entry.title || (isProcessing ? 'Extracting knowledge...' : entry.processing_status === 'failed' ? 'Analysis failed' : 'Untitled')}
             </Text>
             <View style={styles.compactRight}>
               {platformIcon && (

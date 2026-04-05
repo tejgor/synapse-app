@@ -77,6 +77,11 @@ export async function deleteEntry(id: string): Promise<void> {
   await db.runAsync('DELETE FROM entries WHERE id = ?', id);
 }
 
+export async function clearAllEntries(): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM entries');
+}
+
 export async function getPendingEntries(): Promise<Entry[]> {
   const db = await getDatabase();
   return db.getAllAsync<Entry>(

@@ -7,14 +7,31 @@ if (Platform.OS === 'ios') {
   BackgroundTask = require('../../modules/background-task').default;
 }
 
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+export function onProcessingUpdate(fn: Listener) {
+  listeners.add(fn);
+  return () => { listeners.delete(fn); };
+}
+
+function notifyUpdate() {
+  listeners.forEach((fn) => fn());
+}
+
 export async function processEntry(entryId: string): Promise<void> {
   BackgroundTask?.beginBackgroundTask();
+  console.log(`[processing] start entryId=${entryId}`);
   try {
     await updateEntry(entryId, { processing_status: 'processing' });
 
     const entry = await getEntryById(entryId);
-    if (!entry) return;
+    if (!entry) {
+      console.warn(`[processing] entry ${entryId} not found — skipping`);
+      return;
+    }
 
+    console.log(`[processing] calling API for url=${entry.source_url} platform=${entry.source_platform}`);
     const result = await callProcessAPI(entry.source_url, entry.source_platform);
 
     await updateEntry(entryId, {
@@ -27,11 +44,13 @@ export async function processEntry(entryId: string): Promise<void> {
       processing_status: 'completed',
       processed_at: new Date().toISOString(),
     });
+    console.log(`[processing] completed entryId=${entryId} title="${result.title}"`);
   } catch (err) {
-    console.error('Processing failed for entry', entryId, err);
+    console.error(`[processing] failed entryId=${entryId}:`, err);
     await updateEntry(entryId, { processing_status: 'failed' });
   } finally {
     BackgroundTask?.endBackgroundTask();
+    notifyUpdate();
   }
 }
 
