@@ -91,7 +91,17 @@ export default function RootLayout() {
           headerShadowVisible: false,
         }}
       >
-        <Stack.Screen name="index" options={{ title: 'Synapse' }} />
+        <Stack.Screen
+          name="index"
+          options={{
+            title: 'Synapse',
+            headerRight: () => (
+              <Pressable onPress={() => router.push('/settings' as any)} hitSlop={8}>
+                <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
+              </Pressable>
+            ),
+          }}
+        />
         <Stack.Screen
           name="capture"
           options={{
@@ -103,6 +113,10 @@ export default function RootLayout() {
         <Stack.Screen
           name="entry/[id]"
           options={{ title: '', headerBackTitle: '' }}
+        />
+        <Stack.Screen
+          name="settings"
+          options={{ title: 'Settings', headerBackTitle: '' }}
         />
       </Stack>
     </ShareIntentProvider>

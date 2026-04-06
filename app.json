@@ -48,7 +48,8 @@
           }
         }
       ],
-      "./plugins/withBackgroundURLSession"
+      "./plugins/withBackgroundURLSession",
+      ["llama.rn", { "enableEntitlements": true, "forceCxx20": true }]
     ],
     "experiments": {
       "typedRoutes": true

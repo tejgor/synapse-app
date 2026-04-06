@@ -1,6 +1,10 @@
 import { Platform } from 'react-native';
 import { getEntryById, updateEntry, getPendingEntries, getCategories, getTags } from '../db/entries';
 import { processEntry as callProcessAPI, ApiError } from './api';
+import { getProcessingMode } from './settings';
+import { isModelReady } from './modelManager';
+import { fetchTranscript, fetchMetadata } from './transcript';
+import { extractKnowledgeLocally } from './localExtraction';
 import type { ProcessResponse } from '../types';
 
 // Background request module — iOS only
@@ -93,9 +97,81 @@ export async function handleBackgroundResult(event: {
   notifyUpdate();
 }
 
+// ─── Local (on-device) processing path ───────────────────────────────────────
+
+async function processEntryLocally(entryId: string): Promise<void> {
+  console.log(`[processing] local start entryId=${entryId}`);
+
+  await updateEntry(entryId, { processing_status: 'processing' });
+  notifyUpdate();
+
+  const entry = await getEntryById(entryId);
+  if (!entry) {
+    console.warn(`[processing] entry ${entryId} not found — skipping`);
+    return;
+  }
+
+  const [existingCategories, existingTags] = await Promise.all([getCategories(), getTags()]);
+
+  try {
+    // Step 1: Fetch transcript + metadata (still requires network)
+    console.log(`[processing] local — fetching transcript url=${entry.source_url}`);
+    const [transcript, metadata] = await Promise.all([
+      fetchTranscript(entry.source_url, entry.source_platform),
+      fetchMetadata(entry.source_url),
+    ]);
+
+    // Step 2: Run local AI extraction
+    const result = await extractKnowledgeLocally(
+      transcript,
+      entry.source_url,
+      metadata,
+      existingCategories,
+      existingTags,
+    );
+
+    await updateEntry(entryId, {
+      video_transcript: result.videoTranscript,
+      title: result.title,
+      summary: result.summary,
+      category: result.category,
+      tags: JSON.stringify(result.tags),
+      key_details: JSON.stringify(result.sections || result.keyDetails),
+      content_type: result.contentType || null,
+      processing_status: 'completed',
+      processed_at: new Date().toISOString(),
+      ...(result.metadata ? {
+        author_name: result.metadata.authorName,
+        author_username: result.metadata.authorUsername,
+        thumbnail_url: result.metadata.thumbnailUrl,
+        duration: result.metadata.duration,
+        view_count: result.metadata.viewCount,
+        like_count: result.metadata.likeCount,
+        published_at: result.metadata.publishedAt,
+      } : {}),
+    });
+    console.log(`[processing] local completed entryId=${entryId} title="${result.title}"`);
+  } catch (err) {
+    console.error(`[processing] local failed entryId=${entryId}:`, err);
+    await updateEntry(entryId, { processing_status: 'failed' });
+  }
+
+  notifyUpdate();
+}
+
 // ─── Start processing an entry ────────────────────────────────────────────────
 
 export async function processEntry(entryId: string): Promise<void> {
+  // Check if local processing is enabled and model is ready
+  try {
+    const mode = await getProcessingMode();
+    if (mode === 'local' && await isModelReady()) {
+      return processEntryLocally(entryId);
+    }
+  } catch {
+    // Fall through to cloud processing on any settings error
+  }
+
   console.log(`[processing] start entryId=${entryId}`);
 
   await updateEntry(entryId, { processing_status: 'processing' });
