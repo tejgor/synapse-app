@@ -1,12 +1,13 @@
-import { useEffect } from 'react';
-import { Pressable } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { AppState, Platform, Pressable } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useShareIntentContext, ShareIntentProvider } from 'expo-share-intent';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useFonts } from 'expo-font';
 import { getDatabase } from '@/src/db/schema';
-import { retryFailedEntries } from '@/src/services/processing';
+import { retryFailedEntries, handleBackgroundResult } from '@/src/services/processing';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { colors } from '@/src/constants/theme';
 
@@ -25,11 +26,54 @@ function ShareIntentHandler() {
 }
 
 export default function RootLayout() {
+  const appState = useRef(AppState.currentState);
+
+  // Load SpaceMono for metadata/label typography
+  const [fontsLoaded] = useFonts({
+    'SpaceMono': require('../assets/fonts/SpaceMono-Regular.ttf'),
+  });
+
   useEffect(() => {
-    // Initialize database and retry any pending entries on app launch
-    getDatabase().then(() => {
+    getDatabase().then(async () => {
+      // Drain any background results that arrived while the app was dead
+      if (Platform.OS === 'ios') {
+        const BackgroundRequest = require('../modules/background-request').default;
+        const pending = BackgroundRequest.getPendingResults() as Array<{
+          entryId: string; response?: string; error?: string; statusCode?: number;
+        }>;
+        for (const result of pending) {
+          await handleBackgroundResult(result);
+          BackgroundRequest.clearResult(result.entryId);
+        }
+      }
+
       retryFailedEntries();
     });
+
+    // Listen for background results that arrive while the app is alive
+    let bgSub: { remove(): void } | null = null;
+    if (Platform.OS === 'ios') {
+      const { emitter } = require('../modules/background-request');
+      bgSub = emitter.addListener('onRequestComplete', async (event: {
+        entryId: string; response?: string; error?: string; statusCode?: number;
+      }) => {
+        await handleBackgroundResult(event);
+        const BackgroundRequest = require('../modules/background-request').default;
+        BackgroundRequest.clearResult(event.entryId);
+      });
+    }
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (appState.current.match(/inactive|background/) && nextState === 'active') {
+        retryFailedEntries();
+      }
+      appState.current = nextState;
+    });
+
+    return () => {
+      subscription.remove();
+      bgSub?.remove();
+    };
   }, []);
 
   return (
@@ -41,31 +85,24 @@ export default function RootLayout() {
         screenOptions={{
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.text,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTitleStyle: { fontWeight: '700', fontSize: 17 },
           contentStyle: { backgroundColor: colors.background },
           animation: 'slide_from_right',
+          headerShadowVisible: false,
         }}
       >
-        <Stack.Screen
-          name="index"
-          options={{ title: 'Synapse' }}
-        />
+        <Stack.Screen name="index" options={{ title: 'Synapse' }} />
         <Stack.Screen
           name="capture"
           options={{
-            title: 'Capture',
-            presentation: 'modal',
-            animation: 'slide_from_bottom',
-            headerLeft: () => (
-              <Pressable onPress={() => router.back()}>
-                <Ionicons name="close" size={24} color={colors.text} />
-              </Pressable>
-            ),
+            headerShown: false,
+            presentation: 'transparentModal',
+            animation: 'fade',
           }}
         />
         <Stack.Screen
           name="entry/[id]"
-          options={{ title: '' }}
+          options={{ title: '', headerBackTitle: '' }}
         />
       </Stack>
     </ShareIntentProvider>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,69 +7,389 @@ import {
   StyleSheet,
   Linking,
   ActivityIndicator,
+  Alert,
+  Dimensions,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  interpolate,
+} from 'react-native-reanimated';
+import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, borderRadius } from '@/src/constants/theme';
-import { AudioPlayer } from '@/src/components/AudioPlayer';
-import { TopicTag } from '@/src/components/TopicTag';
-import { HighlightCard } from '@/src/components/HighlightCard';
-import { YouTubePlayerComponent, type YouTubePlayerHandle } from '@/src/components/YouTubePlayer';
-import { extractYouTubeVideoId } from '@/src/services/thumbnail';
-import { getEntryById } from '@/src/db/entries';
-import type { Entry, TimestampedHighlight } from '@/src/types';
+import {
+  colors, spacing, borderRadius, shadows, typography, animation, categoryColor, categoryTint,
+} from '@/src/constants/theme';
+import { getEntryById, updateEntry, deleteEntry, renameCategory } from '@/src/db/entries';
+import { notifyUpdate, onProcessingUpdate, processEntry } from '@/src/services/processing';
+import type { Entry, KeyDetail, ContentSection, ContentItem } from '@/src/types';
+import { usePressAnimation } from '@/src/utils/animations';
+import { useCrystallize } from '@/src/utils/useCrystallize';
+import { SynapsePulse } from '@/src/components/SynapsePulse';
 
-function formatSeconds(sec: number): string {
-  const total = Math.floor(sec);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// 2-col grid: 24px margins each side + 12px gap
+const CARD_WIDTH = (SCREEN_WIDTH - spacing.lg * 2 - 12) / 2;
+
+const PLATFORM_LABELS: Record<string, string> = {
+  tiktok: 'TikTok',
+  instagram: 'Instagram Reels',
+  youtube: 'YouTube',
+};
+const PLATFORM_ICONS: Record<string, string> = {
+  tiktok: 'logo-tiktok',
+  instagram: 'logo-instagram',
+  youtube: 'logo-youtube',
+};
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
+
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toString();
+}
+
+// ─── Ornamental divider ───────────────────────────────────────────────────────
+
+function NodeDivider({ catColor }: { catColor: string }) {
+  return (
+    <View style={styles.divider}>
+      <View style={styles.dividerLine} />
+      <View style={[styles.dividerNode, { backgroundColor: catColor }]} />
+      <View style={styles.dividerLine} />
+    </View>
+  );
+}
+
+// ─── Insight mini-card ────────────────────────────────────────────────────────
+
+function InsightCard({
+  label, value, delay, catColor,
+}: { label: string; value: string; delay: number; catColor: string }) {
+  const crystalStyle = useCrystallize({ delay, seed: delay });
+  const isUrl = value.startsWith('http://') || value.startsWith('https://');
+  return (
+    <Animated.View style={[styles.insightCard, crystalStyle]}>
+      {/* Category-colored top accent — 4px, full opacity */}
+      <View style={[styles.insightAccent, { backgroundColor: catColor }]} />
+      <Text style={styles.insightLabel}>{label}</Text>
+      {isUrl ? (
+        <Pressable onPress={() => Linking.openURL(value)}>
+          <Text style={styles.insightLink} numberOfLines={2}>{value}</Text>
+        </Pressable>
+      ) : (
+        <Text style={styles.insightValue} numberOfLines={3}>{value}</Text>
+      )}
+    </Animated.View>
+  );
+}
+
+// ─── Content type icon mapping ────────────────────────────────────────────────
+
+const CONTENT_TYPE_ICONS: Record<string, string> = {
+  tutorial: 'school-outline',
+  walkthrough: 'school-outline',
+  demo: 'school-outline',
+  review: 'star-half-outline',
+  comparison: 'git-compare-outline',
+  'quick tip': 'flash-outline',
+  tip: 'flash-outline',
+  recipe: 'restaurant-outline',
+  explainer: 'bulb-outline',
+  'resource list': 'list-outline',
+  opinion: 'chatbubble-outline',
+  news: 'newspaper-outline',
+  story: 'book-outline',
+};
+
+function getContentTypeIcon(contentType: string): string {
+  const key = contentType.toLowerCase();
+  return CONTENT_TYPE_ICONS[key] || 'document-text-outline';
+}
+
+// ─── Section renderers ───────────────────────────────────────────────────────
+
+function OrderedItem({ item, index, total, catColor, delay }: {
+  item: ContentItem; index: number; total: number; catColor: string; delay: number;
+}) {
+  const crystalStyle = useCrystallize({ delay, seed: delay });
+  return (
+    <Animated.View style={[styles.orderedItem, crystalStyle]}>
+      <View style={styles.stepConnector}>
+        <View style={[styles.stepCircle, { backgroundColor: catColor }]}>
+          <Text style={styles.stepNumber}>{index + 1}</Text>
+        </View>
+        {index < total - 1 && <View style={[styles.stepLine, { backgroundColor: `${catColor}33` }]} />}
+      </View>
+      <Text style={styles.orderedText}>{item.text}</Text>
+    </Animated.View>
+  );
+}
+
+function OrderedSection({ items, catColor, baseDelay }: {
+  items: ContentItem[]; catColor: string; baseDelay: number;
+}) {
+  return (
+    <View style={styles.orderedSection}>
+      {items.map((item, i) => (
+        <OrderedItem key={i} item={item} index={i} total={items.length} catColor={catColor} delay={baseDelay + i * 50} />
+      ))}
+    </View>
+  );
+}
+
+function UnorderedItem({ item, catColor, delay }: {
+  item: ContentItem; catColor: string; delay: number;
+}) {
+  const crystalStyle = useCrystallize({ delay, seed: delay });
+  return (
+    <Animated.View style={[styles.unorderedItem, crystalStyle]}>
+      <View style={[styles.bulletDot, { backgroundColor: catColor }]} />
+      <Text style={styles.unorderedText}>{item.text}</Text>
+    </Animated.View>
+  );
+}
+
+function UnorderedSection({ items, catColor, baseDelay }: {
+  items: ContentItem[]; catColor: string; baseDelay: number;
+}) {
+  return (
+    <View style={styles.unorderedSection}>
+      {items.map((item, i) => (
+        <UnorderedItem key={i} item={item} catColor={catColor} delay={baseDelay + i * 40} />
+      ))}
+    </View>
+  );
+}
+
+function KeyValueSection({ items, catColor, baseDelay }: {
+  items: ContentItem[]; catColor: string; baseDelay: number;
+}) {
+  return (
+    <View style={styles.insightGrid}>
+      {items.map((item, i) => (
+        <InsightCard
+          key={i}
+          label={item.label || ''}
+          value={item.text}
+          catColor={catColor}
+          delay={baseDelay + i * 60}
+        />
+      ))}
+    </View>
+  );
+}
+
+function SingleSection({ items, catColor, baseDelay }: {
+  items: ContentItem[]; catColor: string; baseDelay: number;
+}) {
+  const text = items.map((item) => item.text).join('\n\n');
+  const crystalStyle = useCrystallize({ delay: baseDelay, seed: baseDelay });
+  return (
+    <Animated.View style={[styles.singleBlock, { backgroundColor: `${catColor}14` }, crystalStyle]}>
+      <View style={[styles.singleBar, { backgroundColor: catColor }]} />
+      <Text style={styles.singleText}>{text}</Text>
+    </Animated.View>
+  );
+}
+
+function SectionBlock({ section, catColor, baseDelay }: {
+  section: ContentSection; catColor: string; baseDelay: number;
+}) {
+  const crystalStyle = useCrystallize({ delay: baseDelay, seed: baseDelay });
+  return (
+    <Animated.View style={crystalStyle}>
+      <Text style={styles.sectionLabel}>{section.heading}</Text>
+      {section.style === 'ordered' && (
+        <OrderedSection items={section.items} catColor={catColor} baseDelay={baseDelay + 20} />
+      )}
+      {section.style === 'unordered' && (
+        <UnorderedSection items={section.items} catColor={catColor} baseDelay={baseDelay + 20} />
+      )}
+      {section.style === 'key-value' && (
+        <KeyValueSection items={section.items} catColor={catColor} baseDelay={baseDelay + 20} />
+      )}
+      {section.style === 'single' && (
+        <SingleSection items={section.items} catColor={catColor} baseDelay={baseDelay + 20} />
+      )}
+    </Animated.View>
+  );
+}
+
+// ─── Transcript ───────────────────────────────────────────────────────────────
+
+function TranscriptSection({ transcript }: { transcript: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const progress = useSharedValue(0);
+
+  const toggle = useCallback(() => {
+    const next = !expanded;
+    setExpanded(next);
+    progress.value = withTiming(next ? 1 : 0, { duration: animation.duration.normal });
+  }, [expanded]);
+
+  const expandStyle = useAnimatedStyle(() => ({
+    maxHeight: interpolate(progress.value, [0, 1], [0, 6000]),
+    opacity: interpolate(progress.value, [0, 0.4, 1], [0, 0, 1]),
+    overflow: 'hidden',
+  }));
+
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(progress.value, [0, 1], [0, 180])}deg` }],
+  }));
+
+  return (
+    <View style={styles.transcriptWrapper}>
+      <View style={styles.transcriptPreviewBlock}>
+        <Text style={styles.transcriptText} numberOfLines={expanded ? undefined : 4}>
+          {transcript}
+        </Text>
+        {!expanded && <View style={styles.transcriptFade} pointerEvents="none" />}
+      </View>
+      <Pressable style={styles.transcriptToggle} onPress={toggle}>
+        <Text style={styles.transcriptToggleText}>
+          {expanded ? 'Collapse' : 'Read full transcript'}
+        </Text>
+        <Animated.View style={chevronStyle}>
+          <Ionicons name="chevron-down" size={13} color={colors.accentMuted} />
+        </Animated.View>
+      </Pressable>
+      <Animated.View style={expandStyle}>
+        <Text style={[styles.transcriptText, { marginTop: 12 }]}>{transcript}</Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+// ─── Floating source pill ─────────────────────────────────────────────────────
+
+function SourcePill({ url, platform }: { url: string; platform: string }) {
+  const { animatedStyle, onPressIn, onPressOut } = usePressAnimation(0.93);
+  const platformIcon = PLATFORM_ICONS[platform] as any;
+
+  return (
+    <View style={styles.pillAnchor}>
+      <SynapsePulse intensity="subtle" radius={99}>
+        <AnimatedPressable
+          style={[styles.sourcePill, animatedStyle]}
+          onPress={() => Linking.openURL(url)}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
+        >
+          {platformIcon && (
+            <Ionicons name={platformIcon} size={13} color={colors.textSecondary} style={{ marginRight: 6 }} />
+          )}
+          <Text style={styles.sourcePillText}>
+            {PLATFORM_LABELS[platform] || platform}
+          </Text>
+          <Ionicons name="open-outline" size={12} color={colors.textTertiary} style={{ marginLeft: 5 }} />
+        </AnimatedPressable>
+      </SynapsePulse>
+    </View>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function DetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [entry, setEntry] = useState<Entry | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeHighlightIndex, setActiveHighlightIndex] = useState<number | null>(null);
-  const playerRef = useRef<YouTubePlayerHandle>(null);
 
-  // Supercut state
-  const [supercutMode, setSupercutMode] = useState(false);
-  const [supercutHighlightIndex, setSupercutHighlightIndex] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [videoDuration, setVideoDuration] = useState<number | null>(null);
+  const reload = useCallback(() => {
+    if (!id) return;
+    getEntryById(id).then(setEntry);
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
-    getEntryById(id)
-      .then(setEntry)
-      .finally(() => setLoading(false));
+    getEntryById(id).then(setEntry).finally(() => setLoading(false));
   }, [id]);
 
-  const handlePlayerReady = useCallback(async () => {
-    const dur = await playerRef.current?.getDuration();
-    if (dur && dur > 0) setVideoDuration(dur);
-  }, []);
+  useEffect(() => onProcessingUpdate(reload), [reload]);
 
-  const handleHighlightPress = useCallback((highlight: TimestampedHighlight, index: number) => {
-    setActiveHighlightIndex(index);
-    if (supercutMode) setSupercutHighlightIndex(index);
-    playerRef.current?.seekTo(highlight.timestamp);
-  }, [supercutMode]);
+  const handleEditCategory = useCallback(() => {
+    if (!entry?.category || !id) return;
+    const oldCategory = entry.category;
 
-  const toggleSupercut = useCallback(() => {
-    setSupercutMode((prev) => {
-      if (!prev) {
-        setSupercutHighlightIndex(0);
-        setCurrentTime(0);
-      }
-      return !prev;
-    });
-  }, []);
+    Alert.prompt(
+      'Edit Category',
+      'Enter a new category name',
+      (newCategory) => {
+        const trimmed = newCategory.trim();
+        if (!trimmed || trimmed === oldCategory) return;
+
+        Alert.alert(
+          'Apply to...',
+          `Rename "${oldCategory}" to "${trimmed}"`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Just this entry',
+              onPress: async () => {
+                await updateEntry(id, { category: trimmed });
+                reload();
+                notifyUpdate();
+              },
+            },
+            {
+              text: `All "${oldCategory}" entries`,
+              onPress: async () => {
+                await renameCategory(oldCategory, trimmed);
+                reload();
+                notifyUpdate();
+              },
+            },
+          ],
+        );
+      },
+      'plain-text',
+      oldCategory,
+    );
+  }, [entry?.category, id, reload]);
+
+  const handleRetry = useCallback(async () => {
+    if (!id) return;
+    await updateEntry(id, { processing_status: 'pending' });
+    reload();
+    processEntry(id);
+  }, [id, reload]);
+
+  const handleRemove = useCallback(() => {
+    if (!id) return;
+    Alert.alert('Remove entry', "This can't be undone.", [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteEntry(id);
+          notifyUpdate();
+          router.back();
+        },
+      },
+    ]);
+  }, [id]);
+
+  // Crystallization delays for each section
+  const titleCrystal = useCrystallize({ delay: 80, seed: 1 });
+  const dateCrystal = useCrystallize({ delay: 120, seed: 2 });
+  const quoteCrystal = useCrystallize({ delay: 180, seed: 3 });
+  const tagsCrystal = useCrystallize({ delay: 230, seed: 4 });
+  const insightsCrystal = useCrystallize({ delay: 280, seed: 5 });
+  const transcriptCrystal = useCrystallize({ delay: 330, seed: 6 });
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={styles.loading}>
         <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
@@ -77,444 +397,417 @@ export default function DetailScreen() {
 
   if (!entry) {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.errorText}>Entry not found</Text>
+      <View style={styles.loading}>
+        <Text style={{ color: colors.textTertiary, fontSize: 15 }}>Entry not found</Text>
       </View>
     );
   }
 
-  const keyLearnings: string[] = entry.key_learnings
-    ? JSON.parse(entry.key_learnings)
-    : [];
-  const highlights: TimestampedHighlight[] = entry.highlights
-    ? JSON.parse(entry.highlights)
-    : [];
+  const tags: string[] = entry.tags ? JSON.parse(entry.tags) : [];
+  const isLegacy = !entry.content_type;
+  const keyDetails: KeyDetail[] = isLegacy && entry.key_details ? JSON.parse(entry.key_details) : [];
+  const sections: ContentSection[] = !isLegacy && entry.key_details ? JSON.parse(entry.key_details) : [];
+  const catColor = entry.category ? categoryColor(entry.category) : colors.accent;
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
-  const isYouTube = entry.source_platform === 'youtube';
-  const videoId = isYouTube ? extractYouTubeVideoId(entry.video_url) : null;
+
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
+    month: 'long', day: 'numeric', year: 'numeric',
   });
 
-  const platformLabel =
-    entry.source_platform === 'tiktok'
-      ? 'TikTok'
-      : entry.source_platform === 'instagram'
-        ? 'Instagram Reels'
-        : 'YouTube';
-
-  // Supercut derived values
-  const totalHighlightDuration = highlights.reduce(
-    (sum, h) => sum + (h.endTimestamp - h.timestamp), 0
-  );
-  const timeSaved = videoDuration && videoDuration > totalHighlightDuration
-    ? videoDuration - totalHighlightDuration
-    : null;
-  const savingsPercent = videoDuration && videoDuration > 0
-    ? Math.round((1 - totalHighlightDuration / videoDuration) * 100)
-    : null;
-
-  // Supercut progress calculation
-  const completedTime = highlights
-    .slice(0, supercutHighlightIndex)
-    .reduce((sum, h) => sum + (h.endTimestamp - h.timestamp), 0);
-  const currentSegment = highlights[supercutHighlightIndex];
-  const currentSegmentElapsed = currentSegment
-    ? Math.max(0, Math.min(currentTime - currentSegment.timestamp, currentSegment.endTimestamp - currentSegment.timestamp))
-    : 0;
-  const supercutElapsed = completedTime + currentSegmentElapsed;
-  const supercutProgress = totalHighlightDuration > 0 ? supercutElapsed / totalHighlightDuration : 0;
-
-  const effectiveActiveIndex = supercutMode ? supercutHighlightIndex : activeHighlightIndex;
-  const canSupercut = highlights.length > 1;
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Header */}
-      <View style={styles.header}>
-        {entry.topic_tag && (
-          <View style={styles.tagRow}>
-            <TopicTag tag={entry.topic_tag} />
+    <View style={styles.outer}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+
+        {/* ── Category pill + Content type badge ── */}
+        {(entry.category || entry.content_type) && (
+          <Animated.View style={[styles.catRow, dateCrystal]}>
+            {entry.category && (
+              <Pressable onPress={handleEditCategory} hitSlop={6}>
+                <View style={[styles.catPill, { backgroundColor: `${catColor}22` }]}>
+                  <View style={[styles.catDot, { backgroundColor: catColor }]} />
+                  <Text style={[styles.catLabel, { color: catColor }]}>{entry.category}</Text>
+                  <Ionicons name="pencil" size={10} color={`${catColor}88`} />
+                </View>
+              </Pressable>
+            )}
+            {entry.content_type && (
+              <View style={styles.typeBadge}>
+                <Ionicons name={getContentTypeIcon(entry.content_type) as any} size={12} color={colors.textTertiary} />
+                <Text style={styles.typeLabel}>{entry.content_type}</Text>
+              </View>
+            )}
+          </Animated.View>
+        )}
+
+        {/* ── Title — biggest element, crystallizes first ── */}
+        {(entry.title || entry.processing_status === 'failed') && (
+          <Animated.Text style={[styles.title, titleCrystal]}>
+            {entry.title || (entry.source_platform === 'tiktok' ? 'TikTok Video' : entry.source_platform === 'instagram' ? 'Instagram Reel' : 'YouTube Video')}
+          </Animated.Text>
+        )}
+
+        {/* ── Date in SpaceMono ── */}
+        <Animated.Text style={[styles.date, dateCrystal]}>
+          {entry.published_at
+            ? `published ${new Date(entry.published_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} · saved ${date}`
+            : `saved ${date}`}
+        </Animated.Text>
+
+        {/* ── Source URL link for failed entries ── */}
+        {entry.processing_status === 'failed' && (
+          <Pressable onPress={() => Linking.openURL(entry.source_url)}>
+            <Text style={styles.failedSourceLink} numberOfLines={2}>{entry.source_url}</Text>
+          </Pressable>
+        )}
+
+        {/* ── Video metadata row (author, duration, views, likes) ── */}
+        {(entry.author_name || entry.duration != null || entry.view_count != null || entry.like_count != null) && (
+          <Animated.View style={[styles.metaRow, dateCrystal]}>
+            {entry.author_name != null && (
+              <View style={styles.metaChip}>
+                <Ionicons name="person-outline" size={11} color={colors.textTertiary} />
+                <Text style={styles.metaText}>
+                  {entry.author_name}{entry.author_username ? ` @${entry.author_username}` : ''}
+                </Text>
+              </View>
+            )}
+            {entry.duration != null && entry.duration > 0 && (
+              <View style={styles.metaChip}>
+                <Ionicons name="time-outline" size={11} color={colors.textTertiary} />
+                <Text style={styles.metaText}>{formatDuration(entry.duration)}</Text>
+              </View>
+            )}
+            {entry.view_count != null && (
+              <View style={styles.metaChip}>
+                <Ionicons name="eye-outline" size={11} color={colors.textTertiary} />
+                <Text style={styles.metaText}>{formatCount(entry.view_count)} views</Text>
+              </View>
+            )}
+            {entry.like_count != null && (
+              <View style={styles.metaChip}>
+                <Ionicons name="heart-outline" size={11} color={colors.textTertiary} />
+                <Text style={styles.metaText}>{formatCount(entry.like_count)}</Text>
+              </View>
+            )}
+          </Animated.View>
+        )}
+
+        {/* ── Summary as pull-quote with category-colored bar ── */}
+        {entry.summary && (
+          <Animated.View style={[styles.pullQuote, { backgroundColor: categoryTint(entry.category || '') }, quoteCrystal]}>
+            <View style={[styles.pullBar, { backgroundColor: catColor }]} />
+            <Text style={styles.pullText}>{entry.summary}</Text>
+          </Animated.View>
+        )}
+
+        {/* ── Tags ── */}
+        {tags.length > 0 && (
+          <Animated.View style={[styles.tagsRow, tagsCrystal]}>
+            {tags.map((tag) => (
+              <View key={tag} style={styles.tagChip}>
+                <Text style={styles.tagText}>{tag}</Text>
+              </View>
+            ))}
+          </Animated.View>
+        )}
+
+        {/* ── Processing / failed ── */}
+        {isProcessing && (
+          <View style={styles.banner}>
+            <ActivityIndicator size="small" color={colors.warning} />
+            <Text style={styles.bannerText}>Extracting knowledge...</Text>
           </View>
         )}
-        <Text style={styles.date}>{date}</Text>
-        <Text style={styles.platform}>{platformLabel}</Text>
-      </View>
-
-      {/* Processing banner */}
-      {isProcessing && (
-        <View style={styles.processingBanner}>
-          <ActivityIndicator size="small" color={colors.accent} />
-          <Text style={styles.processingText}>
-            {isYouTube ? 'Extracting highlights...' : 'Processing your capture...'}
-          </Text>
-        </View>
-      )}
-
-      {entry.processing_status === 'failed' && (
-        <View style={[styles.processingBanner, styles.failedBanner]}>
-          <Text style={styles.failedText}>
-            {isYouTube
-              ? 'Failed to extract highlights. Try again later.'
-              : 'Processing failed. Your voice note is still saved.'}
-          </Text>
-        </View>
-      )}
-
-      {/* YouTube: Embedded player */}
-      {isYouTube && videoId && (
-        <YouTubePlayerComponent
-          ref={playerRef}
-          videoId={videoId}
-          supercutMode={supercutMode}
-          highlights={highlights}
-          onHighlightChange={setSupercutHighlightIndex}
-          onCurrentTimeChange={setCurrentTime}
-          onSupercutComplete={() => setSupercutMode(false)}
-          onReady={handlePlayerReady}
-        />
-      )}
-
-      {/* YouTube: Highlights section */}
-      {isYouTube && highlights.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>
-            Key Highlights ({highlights.length})
-          </Text>
-
-          {/* Supercut toggle */}
-          {canSupercut && (
-            <Pressable
-              onPress={toggleSupercut}
-              style={[styles.supercutToggle, supercutMode && styles.supercutToggleActive]}
-            >
-              <View style={styles.supercutLeft}>
-                <Ionicons
-                  name={supercutMode ? 'pause-circle' : 'play-circle'}
-                  size={22}
-                  color={supercutMode ? colors.text : colors.accentLight}
-                />
-                <View>
-                  <Text style={[styles.supercutLabel, supercutMode && styles.supercutLabelActive]}>
-                    Supercut
-                  </Text>
-                  <Text style={styles.supercutSubtitle}>
-                    {supercutMode ? 'Playing condensed version' : 'Skip the filler, just insights'}
-                  </Text>
-                </View>
-              </View>
-              {timeSaved !== null && savingsPercent !== null && savingsPercent > 0 && (
-                <View style={[styles.savingsBadge, supercutMode && styles.savingsBadgeActive]}>
-                  <Text style={[styles.savingsText, supercutMode && styles.savingsTextActive]}>
-                    Saves {formatSeconds(timeSaved)} · {savingsPercent}%
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-          )}
-
-          {/* Supercut progress bar */}
-          {supercutMode && (
-            <View style={styles.supercutProgress}>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${Math.min(supercutProgress * 100, 100)}%` }]} />
-              </View>
-              <View style={styles.progressMeta}>
-                <Text style={styles.segmentInfo}>
-                  Segment {supercutHighlightIndex + 1} of {highlights.length}
-                </Text>
-                <Text style={styles.segmentInfo}>
-                  {formatSeconds(supercutElapsed)} / {formatSeconds(totalHighlightDuration)}
-                </Text>
-              </View>
+        {entry.processing_status === 'failed' && (
+          <View style={styles.failedSection}>
+            <View style={[styles.banner, { backgroundColor: colors.errorSubtle }]}>
+              <Ionicons name="warning-outline" size={15} color={colors.error} />
+              <Text style={[styles.bannerText, { color: colors.error }]}>Processing failed.</Text>
             </View>
-          )}
+            <View style={styles.failedActions}>
+              <Pressable style={styles.retryButton} onPress={handleRetry}>
+                <Ionicons name="refresh-outline" size={16} color={colors.accent} />
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </Pressable>
+              <Pressable style={styles.removeButton} onPress={handleRemove}>
+                <Ionicons name="trash-outline" size={16} color={colors.error} />
+                <Text style={styles.removeButtonText}>Remove</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
 
-          <View style={styles.highlightsList}>
-            {highlights.map((highlight, index) => (
-              <HighlightCard
-                key={index}
-                highlight={highlight}
-                index={index}
-                isActive={effectiveActiveIndex === index}
-                onPress={() => handleHighlightPress(highlight, index)}
+        {/* ── Node divider ── */}
+        {(keyDetails.length > 0 || sections.length > 0) && <NodeDivider catColor={catColor} />}
+
+        {/* ── Content sections (new) or legacy insights grid ── */}
+        {!isLegacy && sections.length > 0 && (
+          <View style={styles.sectionsContainer}>
+            {sections.map((section, i) => (
+              <SectionBlock
+                key={i}
+                section={section}
+                catColor={catColor}
+                baseDelay={280 + i * 80}
               />
             ))}
           </View>
-        </View>
-      )}
+        )}
+        {isLegacy && keyDetails.length > 0 && (
+          <Animated.View style={insightsCrystal}>
+            <Text style={styles.sectionLabel}>Insights</Text>
+            <View style={styles.insightGrid}>
+              {keyDetails.map((d: KeyDetail, i: number) => (
+                <InsightCard
+                  key={i}
+                  label={d.label}
+                  value={d.value}
+                  catColor={catColor}
+                  delay={280 + i * 60}
+                />
+              ))}
+            </View>
+          </Animated.View>
+        )}
 
-      {/* TikTok/Instagram: Key Learnings */}
-      {!isYouTube && keyLearnings.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>Key Learnings</Text>
-          <View style={styles.learningsCard}>
-            {keyLearnings.map((learning, index) => (
-              <View key={index} style={styles.learningRow}>
-                <Text style={styles.bullet}>•</Text>
-                <Text style={styles.learningText}>{learning}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      )}
+        {/* ── Node divider ── */}
+        {entry.video_transcript && (keyDetails.length > 0 || sections.length > 0) && <NodeDivider catColor={catColor} />}
 
-      {/* Voice Note */}
-      {entry.voice_note_path && (
-        <View style={styles.section}>
-          <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>Your Voice Note</Text>
-          <AudioPlayer uri={entry.voice_note_path} />
-        </View>
-      )}
+        {/* ── Transcript ── */}
+        {entry.video_transcript && (
+          <Animated.View style={transcriptCrystal}>
+            <Text style={styles.sectionLabel}>Transcript</Text>
+            <TranscriptSection transcript={entry.video_transcript} />
+          </Animated.View>
+        )}
 
-      {/* Voice Note Transcript */}
-      {entry.voice_note_transcript && (
-        <View style={styles.section}>
-          <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>What You Said</Text>
-          <View style={styles.transcriptCard}>
-            <Text style={styles.transcriptText}>
-              "{entry.voice_note_transcript}"
-            </Text>
-          </View>
-        </View>
-      )}
+        <View style={{ height: 80 }} />
+      </ScrollView>
 
-      {/* Video Transcript */}
-      {entry.video_transcript && (
-        <View style={styles.section}>
-          <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>Video Transcript</Text>
-          <View style={styles.transcriptCard}>
-            <Text style={styles.transcriptText}>{entry.video_transcript}</Text>
-          </View>
-        </View>
-      )}
-
-      {/* Open Original */}
-      <Pressable
-        style={styles.openButton}
-        onPress={() => Linking.openURL(entry.video_url)}
-      >
-        <Text style={styles.openButtonText}>
-          Open in {platformLabel}
-        </Text>
-      </Pressable>
-    </ScrollView>
+      {/* ── Floating source pill ── */}
+      <SourcePill url={entry.source_url} platform={entry.source_platform} />
+    </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
+  outer: { flex: 1, backgroundColor: colors.background },
+  scroll: { flex: 1 },
+  content: { paddingTop: spacing.lg, paddingHorizontal: spacing.lg, paddingBottom: 40, gap: 20 },
+  loading: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
+
+  // Header
+  catRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  catPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 5,
+    flexShrink: 1,
   },
-  content: {
-    padding: spacing.lg,
-    paddingBottom: 80,
-    gap: spacing.xl,
+  catDot: { width: 8, height: 8, borderRadius: 4 },
+  catLabel: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2, flexShrink: 1 },
+  title: {
+    color: colors.text,
+    fontSize: 32,
+    fontWeight: '800',
+    lineHeight: 40,
+    letterSpacing: -0.6,
+    marginTop: 4,
   },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: colors.background,
+  date: {
+    ...typography.mono,
+    color: colors.textPlaceholder,
+    marginTop: -4,
+  },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: -6 },
+  metaChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  metaText: { ...typography.mono, color: colors.textTertiary, fontSize: 11 },
+
+  // Pull-quote
+  pullQuote: {
+    flexDirection: 'row',
+    gap: 14,
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.sm,
+    marginTop: 4,
+  },
+  pullBar: { width: 5, borderRadius: 3 },
+  pullText: { flex: 1, color: colors.textSecondary, fontSize: 15, lineHeight: 23 },
+
+  // Tags
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  tagChip: {
+    backgroundColor: colors.accentSubtle,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  tagText: { color: colors.textTertiary, fontSize: 11, fontWeight: '500' },
+
+  // Banners
+  banner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.surface, borderRadius: borderRadius.md,
+    padding: spacing.md, ...shadows.sm,
+  },
+  bannerText: { color: colors.textSecondary, ...typography.caption },
+
+  // Failed entry actions
+  failedSourceLink: {
+    color: colors.accentMuted,
+    fontSize: 13,
+    textDecorationLine: 'underline',
+    marginTop: 4,
+  },
+  failedSection: { gap: 12 },
+  failedActions: { flexDirection: 'row', gap: 12 },
+  retryButton: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.accentSubtle, borderRadius: borderRadius.md, paddingVertical: 14,
+    borderWidth: 1, borderColor: colors.accent,
+  },
+  retryButtonText: { color: colors.accent, fontSize: 14, fontWeight: '600' },
+  removeButton: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.errorSubtle, borderRadius: borderRadius.md, paddingVertical: 14,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.error,
+  },
+  removeButtonText: { color: colors.error, fontSize: 14, fontWeight: '600' },
+
+  // Divider
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.borderSubtle },
+  dividerNode: { width: 5, height: 5, borderRadius: 2.5, opacity: 0.45 },
+
+  // Section label
+  sectionLabel: {
+    ...typography.label,
+    color: colors.textTertiary,
+    marginBottom: 12,
+  },
+
+  // Content type badge
+  typeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surface,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  typeLabel: {
+    ...typography.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    textTransform: 'capitalize',
+  },
+
+  // Sections container
+  sectionsContainer: { gap: 28 },
+
+  // Ordered section (steps/timeline)
+  orderedSection: { gap: 0 },
+  orderedItem: { flexDirection: 'row', gap: 14, minHeight: 44 },
+  stepConnector: { alignItems: 'center', width: 28 },
+  stepCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  errorText: {
-    color: colors.textMuted,
-    fontSize: 16,
-  },
-  header: {
-    gap: spacing.sm,
-  },
-  tagRow: {
-    flexDirection: 'row',
-  },
-  date: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  platform: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.cardBorder,
-    marginBottom: spacing.xs,
-  },
-  processingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.accent,
-  },
-  failedBanner: {
-    borderColor: colors.error,
-  },
-  processingText: {
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-  failedText: {
-    color: colors.error,
-    fontSize: 14,
-  },
-  section: {
-    gap: spacing.sm,
-  },
-  sectionTitle: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-  },
-  // Supercut toggle
-  supercutToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    marginTop: spacing.xs,
-  },
-  supercutToggleActive: {
-    backgroundColor: colors.cardElevated,
-    borderColor: colors.accent,
-  },
-  supercutLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+  stepNumber: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  stepLine: { flex: 1, width: 2, marginVertical: 4 },
+  orderedText: {
     flex: 1,
-  },
-  supercutLabel: {
-    color: colors.accentLight,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  supercutLabelActive: {
     color: colors.text,
-  },
-  supercutSubtitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 1,
-  },
-  savingsBadge: {
-    backgroundColor: colors.accentGlow,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-    borderWidth: 1,
-    borderColor: 'rgba(99,102,241,0.3)',
-    marginLeft: spacing.sm,
-  },
-  savingsBadgeActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
-  },
-  savingsText: {
-    color: colors.accentLight,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  savingsTextActive: {
-    color: colors.text,
-  },
-  // Supercut progress
-  supercutProgress: {
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  progressTrack: {
-    height: 6,
-    backgroundColor: colors.cardBorder,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: colors.accent,
-    borderRadius: 3,
-  },
-  progressMeta: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  segmentInfo: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontVariant: ['tabular-nums'],
-  },
-  // Highlights
-  highlightsList: {
-    gap: spacing.sm + 4,
-  },
-  // Learnings
-  learningsCard: {
-    backgroundColor: colors.cardElevated,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  learningRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  bullet: {
-    color: colors.accent,
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  learningText: {
-    color: colors.text,
-    fontSize: 15,
-    lineHeight: 22,
-    flex: 1,
-  },
-  transcriptCard: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  transcriptText: {
-    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 21,
-    fontStyle: 'italic',
+    paddingTop: 4,
+    paddingBottom: 12,
   },
-  openButton: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
+
+  // Unordered section (bullets)
+  unorderedSection: { gap: 10 },
+  unorderedItem: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+  bulletDot: { width: 6, height: 6, borderRadius: 3, marginTop: 7 },
+  unorderedText: { flex: 1, color: colors.text, fontSize: 14, lineHeight: 21 },
+
+  // Single section (prominent block)
+  singleBlock: {
+    flexDirection: 'row',
+    gap: 14,
+    borderRadius: 16,
+    padding: 18,
     borderWidth: 1,
-    borderColor: colors.cardBorder,
+    borderColor: colors.border,
+    ...shadows.sm,
   },
-  openButtonText: {
-    color: colors.accentLight,
-    fontSize: 15,
-    fontWeight: '600',
+  singleBar: { width: 5, borderRadius: 3 },
+  singleText: { flex: 1, color: colors.text, fontSize: 15, lineHeight: 24, fontWeight: '500' },
+
+  // Insight grid
+  insightGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  insightCard: {
+    width: CARD_WIDTH,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.sm,
   },
+  insightAccent: { height: 4 },
+  insightLabel: {
+    ...typography.label,
+    color: colors.textTertiary,
+    paddingHorizontal: 12,
+    paddingTop: 11,
+    paddingBottom: 5,
+  },
+  insightValue: {
+    color: colors.text, fontSize: 14, lineHeight: 20,
+    paddingHorizontal: 12, paddingBottom: 12,
+  },
+  insightLink: {
+    color: colors.accent, fontSize: 13, lineHeight: 18,
+    paddingHorizontal: 12, paddingBottom: 12,
+  },
+
+  // Transcript
+  transcriptWrapper: { gap: 0 },
+  transcriptPreviewBlock: { position: 'relative' },
+  transcriptText: { color: colors.textSecondary, fontSize: 13, lineHeight: 21 },
+  transcriptFade: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    height: 28, backgroundColor: colors.background, opacity: 0.88,
+  },
+  transcriptToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 10,
+  },
+  transcriptToggleText: { color: colors.accentMuted, fontSize: 12, fontWeight: '600' },
+
+  // Source pill
+  pillAnchor: { position: 'absolute', bottom: 26, alignSelf: 'center' },
+  sourcePill: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: 16, paddingVertical: 10,
+    ...shadows.md,
+    shadowOpacity: 0.28,
+  },
+  sourcePillText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
 });

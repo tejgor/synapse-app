@@ -1,178 +1,332 @@
 import React, { useRef } from 'react';
-import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator, Animated } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import ReanimatedSwipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, borderRadius, spacing } from '../constants/theme';
-import { TopicTag } from './TopicTag';
-import type { Entry, TimestampedHighlight } from '../types';
+import ReAnimated, { useAnimatedStyle, interpolate, Extrapolation, FadeOut } from 'react-native-reanimated';
+import type { SharedValue } from 'react-native-reanimated';
+import {
+  colors, borderRadius, spacing, shadows, typography, categoryColor, categoryTint, platformColors,
+} from '../constants/theme';
+import { usePressAnimation, usePulse } from '../utils/animations';
+import { useCrystallizeStaggered } from '../utils/useCrystallize';
+import type { Entry } from '../types';
+
+const AnimatedPressable = ReAnimated.createAnimatedComponent(Pressable);
+
+function DeleteAction({ drag, onPress, style }: {
+  drag: SharedValue<number>;
+  onPress: () => void;
+  style: object;
+}) {
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(drag.value, [-80, 0], [1, 0.8], Extrapolation.CLAMP) }],
+  }));
+  return (
+    <Pressable style={style} onPress={onPress}>
+      <ReAnimated.View style={animStyle}>
+        <Ionicons name="trash-outline" size={17} color="white" />
+      </ReAnimated.View>
+    </Pressable>
+  );
+}
+
+export type CardVariant = 'standard' | 'compact';
 
 interface EntryCardProps {
   entry: Entry;
   onPress: () => void;
   onDelete?: () => void;
-  onTagPress?: (tag: string) => void;
+  index?: number;
+  variant?: CardVariant;
+  skipEntrance?: boolean;
 }
 
-export function EntryCard({ entry, onPress, onDelete, onTagPress }: EntryCardProps) {
-  const swipeableRef = useRef<Swipeable>(null);
-  const keyLearnings: string[] = entry.key_learnings
-    ? JSON.parse(entry.key_learnings)
-    : [];
-  const highlights: TimestampedHighlight[] = entry.highlights
-    ? JSON.parse(entry.highlights)
-    : [];
-  const isYouTube = entry.source_platform === 'youtube';
-  const previewText = isYouTube
-    ? (highlights[0]?.title || null)
-    : (keyLearnings[0] || null);
-  const isProcessing = entry.processing_status === 'processing' || entry.processing_status === 'pending';
-  const isDone = entry.processing_status === 'done';
+const PLATFORM_ICONS: Record<string, string> = {
+  tiktok: 'logo-tiktok',
+  instagram: 'logo-instagram',
+  youtube: 'logo-youtube',
+};
+
+const PLATFORM_FALLBACK_TITLES: Record<string, string> = {
+  tiktok: 'TikTok Video',
+  instagram: 'Instagram Reel',
+  youtube: 'YouTube Video',
+};
+
+function ProcessingDot() {
+  const pulseStyle = usePulse();
+  return <ReAnimated.View style={[styles.processingDot, pulseStyle]} />;
+}
+
+export function EntryCard({
+  entry, onPress, onDelete, index = 0, variant = 'standard', skipEntrance = false,
+}: EntryCardProps) {
+  const swipeableRef = useRef<SwipeableMethods>(null);
+  const crystalStyle = useCrystallizeStaggered(index, skipEntrance);
+  const { animatedStyle: pressStyle, onPressIn, onPressOut } = usePressAnimation(0.975);
+
+  const isProcessing =
+    entry.processing_status === 'processing' || entry.processing_status === 'pending';
+
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
+    month: 'short', day: 'numeric',
   });
 
-  const renderRightActions = (
-    _progress: Animated.AnimatedInterpolation<number>,
-    dragX: Animated.AnimatedInterpolation<number>
-  ) => {
-    const scale = dragX.interpolate({
-      inputRange: [-80, 0],
-      outputRange: [1, 0.8],
-      extrapolate: 'clamp',
-    });
+  const catColor = entry.category ? categoryColor(entry.category) : colors.accentMuted;
+  const catTint = entry.category ? categoryTint(entry.category) : 'transparent';
+  const platformIcon = PLATFORM_ICONS[entry.source_platform] as any;
 
+  const renderRightActions = (_progress: SharedValue<number>, drag: SharedValue<number>) => (
+    <DeleteAction
+      drag={drag}
+      style={styles.deleteAction}
+      onPress={() => { swipeableRef.current?.close(); onDelete?.(); }}
+    />
+  );
+
+  // ── Compact variant ──────────────────────────────────────────────────────
+  if (variant === 'compact') {
     return (
-      <Pressable
-        style={styles.deleteAction}
-        onPress={() => {
-          swipeableRef.current?.close();
-          onDelete?.();
-        }}
-      >
-        <Animated.View style={{ transform: [{ scale }] }}>
-          <Ionicons name="trash-outline" size={22} color={colors.text} />
-        </Animated.View>
-      </Pressable>
-    );
-  };
-
-  return (
-    <Swipeable
-      ref={swipeableRef}
-      renderRightActions={renderRightActions}
-      rightThreshold={40}
-      overshootRight={false}
-    >
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [styles.card, pressed && { opacity: 0.75 }]}
-      >
-        {isDone && <View style={styles.accentBorder} />}
-
-        {entry.thumbnail_url ? (
-          <Image source={{ uri: entry.thumbnail_url }} style={styles.thumbnail} />
-        ) : (
-          <View style={[styles.thumbnail, styles.placeholderThumb]}>
-            <Ionicons
-              name={entry.source_platform === 'tiktok' ? 'musical-notes' : entry.source_platform === 'youtube' ? 'play-circle' : 'camera'}
-              size={28}
-              color={colors.textMuted}
-            />
-          </View>
-        )}
-
-        <View style={styles.content}>
-          <View style={styles.topRow}>
-            {entry.topic_tag ? (
-              <TopicTag
-                tag={entry.topic_tag}
-                onPress={() => onTagPress?.(entry.topic_tag!)}
-              />
-            ) : isProcessing ? (
-              <ActivityIndicator size="small" color={colors.accent} />
-            ) : null}
-            <Text style={styles.date}>{date}</Text>
-          </View>
-
-          {previewText ? (
-            <Text style={styles.preview} numberOfLines={2}>
-              {previewText}
+      <ReAnimated.View exiting={FadeOut.duration(200)}>
+      <ReAnimated.View style={[styles.compactWrapper, crystalStyle]}>
+        <ReanimatedSwipeable
+          ref={swipeableRef}
+          renderRightActions={renderRightActions}
+          rightThreshold={40}
+          overshootRight={false}
+        >
+          <AnimatedPressable
+            onPress={onPress}
+            onPressIn={onPressIn}
+            onPressOut={onPressOut}
+            style={[styles.compactCard, { shadowColor: catColor }, pressStyle]}
+          >
+            <View style={[styles.compactDot, { backgroundColor: catColor }]} />
+            <Text style={styles.compactTitle} numberOfLines={1}>
+              {entry.title || (isProcessing ? 'Extracting knowledge...' : entry.processing_status === 'failed' ? (PLATFORM_FALLBACK_TITLES[entry.source_platform] || 'Untitled Video') : 'Untitled')}
             </Text>
-          ) : isProcessing ? (
-            <Text style={styles.processingText}>Processing...</Text>
-          ) : entry.processing_status === 'failed' ? (
-            <Text style={styles.failedText}>Processing failed — tap to view</Text>
-          ) : null}
-        </View>
-      </Pressable>
-    </Swipeable>
+            <View style={styles.compactRight}>
+              {platformIcon && (
+                <Ionicons name={platformIcon} size={10} color={colors.textPlaceholder} style={{ marginRight: 5 }} />
+              )}
+              <Text style={styles.compactDate}>{date}</Text>
+            </View>
+          </AnimatedPressable>
+        </ReanimatedSwipeable>
+      </ReAnimated.View>
+      </ReAnimated.View>
+    );
+  }
+
+  // ── Standard variant ─────────────────────────────────────────────────────
+  return (
+    <ReAnimated.View exiting={FadeOut.duration(200)}>
+    <ReAnimated.View style={[styles.standardWrapper, crystalStyle]}>
+      <ReanimatedSwipeable
+        ref={swipeableRef}
+        renderRightActions={renderRightActions}
+        rightThreshold={40}
+        overshootRight={false}
+      >
+        <AnimatedPressable
+          onPress={onPress}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
+          style={[styles.card, { backgroundColor: catTint, shadowColor: catColor }, pressStyle]}
+        >
+          <View style={styles.cardBody}>
+            {/* Category pill */}
+            {entry.category && !isProcessing && (
+              <View style={[styles.categoryPill, { backgroundColor: `${catColor}22` }]}>
+                <View style={[styles.categoryDot, { backgroundColor: catColor }]} />
+                <Text style={[styles.categoryLabel, { color: catColor }]}>{entry.category}</Text>
+              </View>
+            )}
+            {isProcessing && (
+              <View style={styles.processingRow}>
+                <ProcessingDot />
+                <Text style={styles.processingLabel}>Processing...</Text>
+              </View>
+            )}
+
+            {/* Title */}
+            {(entry.title || entry.processing_status === 'failed') && (
+              <>
+                <Text style={styles.title} numberOfLines={2}>
+                  {entry.title || PLATFORM_FALLBACK_TITLES[entry.source_platform] || 'Untitled Video'}
+                </Text>
+                {entry.processing_status === 'failed' && (
+                  <View style={styles.failedRow}>
+                    <Ionicons name="alert-circle-outline" size={12} color={colors.textTertiary} />
+                    <Text style={styles.failedLabel}>Processing failed</Text>
+                  </View>
+                )}
+              </>
+            )}
+
+            {/* Summary */}
+            {entry.summary ? (
+              <Text style={styles.summary} numberOfLines={2}>{entry.summary}</Text>
+            ) : null}
+
+            {/* Footer: platform + author + date */}
+            <View style={styles.footer}>
+              {platformIcon && (
+                <Ionicons name={platformIcon} size={11} color={colors.textPlaceholder} />
+              )}
+              {entry.author_name != null && (
+                <>
+                  <Text style={styles.authorText} numberOfLines={1}>{entry.author_name}</Text>
+                  <Text style={styles.footerSep}>·</Text>
+                </>
+              )}
+              <Text style={styles.date}>{date}</Text>
+            </View>
+          </View>
+        </AnimatedPressable>
+      </ReanimatedSwipeable>
+    </ReAnimated.View>
+    </ReAnimated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    flexDirection: 'row',
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    overflow: 'hidden',
+  // ── Standard ──────────────────────────────────────────────────────────────
+  standardWrapper: {
     marginHorizontal: spacing.md,
-    marginBottom: spacing.md,
-    minHeight: 108,
+    marginBottom: 10,
   },
-  accentBorder: {
-    width: 3,
-    backgroundColor: colors.accent,
+  card: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  thumbnail: {
-    width: 88,
-    alignSelf: 'stretch',
+  cardBody: {
+    padding: 18,
+    gap: 8,
   },
-  placeholderThumb: {
-    backgroundColor: colors.cardBorder,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  content: {
-    flex: 1,
-    padding: spacing.md,
-    gap: spacing.sm,
-    justifyContent: 'center',
-  },
-  topRow: {
+  categoryPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    alignSelf: 'flex-start',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 5,
   },
-  date: {
-    color: colors.textMuted,
+  categoryDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  categoryLabel: {
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
-  preview: {
-    color: colors.text,
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '500',
+  processingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
   },
-  processingText: {
-    color: colors.textMuted,
-    fontSize: 13,
+  processingLabel: {
+    color: colors.textTertiary,
+    fontSize: 11,
     fontStyle: 'italic',
   },
-  failedText: {
-    color: colors.error,
+  title: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '700',
+    lineHeight: 23,
+    letterSpacing: -0.2,
+  },
+  summary: {
+    color: colors.textSecondary,
     fontSize: 13,
+    lineHeight: 20,
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 2,
+  },
+  date: {
+    ...typography.mono,
+    color: colors.textPlaceholder,
+  },
+  authorText: {
+    ...typography.mono,
+    color: colors.textPlaceholder,
+    fontSize: 10,
+    maxWidth: 120,
+  },
+  footerSep: {
+    ...typography.mono,
+    color: colors.textPlaceholder,
+    fontSize: 10,
+  },
+  failedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  failedLabel: { color: colors.textTertiary, fontSize: 11, fontWeight: '500' },
+  processingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.accent,
   },
   deleteAction: {
     backgroundColor: colors.error,
     justifyContent: 'center',
     alignItems: 'center',
-    width: 80,
-    marginBottom: spacing.md,
-    borderRadius: borderRadius.lg,
-    marginRight: spacing.md,
+    width: 68,
+    marginBottom: 10,
+    borderRadius: 16,
+    marginLeft: 8,
+  },
+
+  // ── Compact ───────────────────────────────────────────────────────────────
+  compactWrapper: {
+    marginHorizontal: spacing.md,
+    marginBottom: 1,
+  },
+  compactCard: {
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.borderSubtle,
+    paddingVertical: 12,
+    paddingRight: 16,
+    gap: 12,
+  },
+  compactDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    flexShrink: 0,
+  },
+  compactTitle: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: -0.1,
+  },
+  compactRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  compactDate: {
+    ...typography.mono,
+    color: colors.textPlaceholder,
+    fontSize: 10,
   },
 });

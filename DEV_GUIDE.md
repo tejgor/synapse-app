@@ -49,7 +49,7 @@ OPENAI_API_KEY=...        # Voice note transcription (Whisper)
 ANTHROPIC_API_KEY=...     # AI summarization (Claude Haiku)
 ```
 
-Then set `EXPO_PUBLIC_API_URL=http://localhost:3000` in the root `.env`.
+Then set `EXPO_PUBLIC_API_URL=http://localhost:3002` in the root `.env`.
 
 ---
 

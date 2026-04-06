@@ -1,6 +1,6 @@
 # Synapse — Codebase Guide
 
-Personal learning capture tool. Users share short-form video URLs (TikTok, Instagram Reels, YouTube) from iOS share sheet or paste them manually. The app extracts key learnings or timestamped highlight "supercuts" using AI, stores results locally, and lets users replay or browse them.
+Personal knowledge base. Users share video URLs (TikTok, Instagram Reels, YouTube) from the iOS share sheet or paste them manually. The app uses AI to extract structured knowledge entries — title, summary, category, tags, and key details — stored locally and browsable via search or category filter.
 
 See `README.md` for project overview and `DEV_GUIDE.md` for setup instructions.
 
@@ -17,7 +17,7 @@ cd backend && npx tsx api/dev-server.ts
 ```
 
 Frontend env: root `.env` — set `EXPO_PUBLIC_API_URL` to local IP or Vercel deployment URL.
-Backend env: `backend/.env` — needs `SUPADATA_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
+Backend env: `backend/.env` — needs `SUPADATA_API_KEY`, `ANTHROPIC_API_KEY`.
 
 ---
 
@@ -26,23 +26,27 @@ Backend env: `backend/.env` — needs `SUPADATA_API_KEY`, `OPENAI_API_KEY`, `ANT
 ```
 iOS Share Sheet / Manual URL paste
         ↓
-   capture.tsx  (thumbnail fetch, voice recording)
+   capture.tsx  (platform detection, URL input)
         ↓
   SQLite entry created (status: pending)
         ↓
-  src/services/processing.ts  (fire-and-forget)
+  src/services/processing.ts  (fire-and-forget, iOS background task)
         ↓
   backend/api/process.ts  (Vercel serverless)
-    ├── Supadata API  →  video transcript
-    ├── OpenAI Whisper  →  voice note transcription (non-YouTube only)
-    └── Anthropic Claude  →  key learnings (Haiku) or supercut highlights (Opus)
+    ├── Supadata API  →  video transcript (returns 422 on failure)
+    └── Anthropic Claude Haiku  →  title, summary, category, tags, keyDetails (returns 422 on failure)
         ↓
-  SQLite entry updated (status: completed)
+  SQLite entry updated (status: completed | failed)
         ↓
-  entry/[id].tsx  (detail view with YouTube player / highlight cards)
+  entry/[id].tsx  (detail view: title, summary, category, tags, key details, collapsible transcript)
 ```
 
-Retry on app launch: `_layout.tsx` calls `retryFailedEntries()` for any `pending`/`failed` entries.
+After save (share flow): `capture.tsx` calls `router.back()` then `Linking.openURL()` with the source
+app's scheme (`tiktok://`, `instagram://`, `youtube://`) to return the user to where they came from.
+
+Retry on app launch + foreground resume: `_layout.tsx` calls `retryFailedEntries()` for any `pending`/`failed`/stale-`processing` entries.
+
+Real-time UI updates: `processing.ts` fires an event via `onProcessingUpdate()` when any entry finishes (success or failure); `useEntries` subscribes and auto-refreshes.
 
 ---
 
@@ -54,7 +58,7 @@ src/
   components/           Reusable UI components
   constants/            Design tokens (theme.ts)
   db/                   SQLite schema + CRUD (expo-sqlite)
-  hooks/                Custom hooks (useEntries, useRecorder)
+  hooks/                Custom hooks (useEntries)
   services/             Business logic (api, processing, thumbnail)
   types.ts              All TypeScript interfaces
 backend/
@@ -69,36 +73,33 @@ assets/                 Fonts, app icons, splash
 ## Key Files
 
 ### Screens (`app/`)
-- `_layout.tsx` — Root Stack navigator, ShareIntentProvider, DB init, retry on launch
-- `index.tsx` — Library screen: searchable/filterable FlatList of entries, swipe-to-delete, FAB
-- `capture.tsx` — Capture modal: URL input, thumbnail preview, platform detection, voice recording, save
-- `entry/[id].tsx` — Detail: YouTube supercut player, highlight cards, key learnings, transcripts, audio playback
+- `_layout.tsx` — Root Stack navigator, ShareIntentProvider, DB init, retry on launch + foreground resume
+- `index.tsx` — Library screen: search bar, category filter bar, SectionList of entry cards, FAB. Hero slot is the most recent **completed** entry only. Failed entries show an alert with Retry/Remove instead of navigating to detail. Long-press FAB 5s → dev clear-all dialog.
+- `capture.tsx` — Add screen: URL paste, platform detection badge, save button. After save via share sheet, returns user to source app via `Linking.openURL(PLATFORM_SCHEMES[platform])`.
+- `entry/[id].tsx` — Detail: title, summary, category tag, tags, key details list, collapsible transcript, source link
 - `+native-intent.tsx` — Intercepts `synapse://dataUrl=...` deep links before Expo Router resolves them
 
 ### Components (`src/components/`)
-- `EntryCard.tsx` — Library list item with thumbnail, tag, swipe-to-delete (Swipeable)
-- `TopicTag.tsx` — Pill tag, used as display and as toggleable filter button
-- `HighlightCard.tsx` — YouTube highlight segment: time range, title, summary, active state
-- `AudioPlayer.tsx` — Play/pause + progress bar using expo-audio
-- `RecordButton.tsx` — Pulsing mic button with animated recording state
-- `YouTubePlayer.tsx` — YouTube iframe wrapper with supercut engine (interval-based segment advancing)
+- `EntryCard.tsx` — Library list item: category badge, title, summary snippet, tag pills, swipe-to-delete
+- `TopicTag.tsx` — Accent pill used as category display and as toggleable filter button
+- `TagPill.tsx` — Subtle small pill for displaying tags on detail screen
+- `KeyDetailRow.tsx` — Label + value row for key details; auto-links URL values via `Linking.openURL`
 
 ### Services (`src/services/`)
-- `api.ts` — `POST /api/process` HTTP client; reads `EXPO_PUBLIC_API_URL`
-- `processing.ts` — Orchestrates entry processing end-to-end; contains `retryFailedEntries()`
-- `thumbnail.ts` — Platform detection, YouTube video ID extraction, thumbnail fetching via oEmbed
+- `api.ts` — `POST /api/process` HTTP client; reads `EXPO_PUBLIC_API_URL`; 25s `AbortController` timeout; throws on non-200
+- `processing.ts` — Orchestrates entry processing; wraps in iOS background task; fires `onProcessingUpdate()` event on completion/failure; contains `retryFailedEntries()`
+- `thumbnail.ts` — Platform detection only: `detectPlatform(url)` → `SourcePlatform | null`
 
 ### Data Layer (`src/db/`)
-- `schema.ts` — SQLite init, `entries` table DDL, inline `highlights` column migration
-- `entries.ts` — `createEntry`, `getEntries`, `getEntryById`, `updateEntry`, `deleteEntry`, `getPendingEntries`
+- `schema.ts` — SQLite init, `entries` table DDL, migration for old schema (adds new columns, copies `video_url`→`source_url`)
+- `entries.ts` — `createEntry`, `getEntries` (search + category filter), `getEntryById`, `updateEntry`, `deleteEntry`, `getPendingEntries`, `getCategories`, `clearAllEntries`
 
 ### Hooks (`src/hooks/`)
-- `useEntries.ts` — Fetches entries with optional search text + tag filter
-- `useRecorder.ts` — Audio recording: permissions, haptics, file management, duration tracking
+- `useEntries.ts` — Fetches entries with optional search text + category filter; subscribes to `onProcessingUpdate` for automatic refresh when processing completes
 
 ### Backend (`backend/api/`)
-- `process.ts` — The only backend endpoint. Contains all AI prompt logic, `extractJSON()`, `snapToNearest()`, `buildYouTubeSystemPrompt()`
-- `dev-server.ts` — Express 5 wrapper, port 3000, 50MB body limit
+- `process.ts` — The only backend endpoint. Fetches transcript via Supadata, extracts knowledge via Claude Haiku. Returns **422** if transcript fails or is empty, or if Claude returns unparseable JSON — never returns 200 with default/empty data. Structured `[process]` logs at each step. Contains `buildKnowledgePrompt()`, `extractJSON()`
+- `dev-server.ts` — Express 5 wrapper, port 3002, 50MB body limit
 
 ---
 
@@ -109,9 +110,7 @@ assets/                 Fonts, app icons, splash
 - **JS engine:** Hermes, New Architecture (Fabric) enabled
 - **Language:** TypeScript ~5.9 (strict), path alias `@/` → project root
 - **Database:** expo-sqlite (`synapse.db`, local only, no cloud sync)
-- **Audio:** expo-audio (recording + playback)
 - **Gestures:** react-native-gesture-handler + react-native-reanimated
-- **YouTube:** react-native-youtube-iframe + react-native-webview
 - **Share extension:** expo-share-intent
 - **Backend runtime:** Vercel (`@vercel/node@3`), TypeScript via tsx in dev
 
@@ -119,16 +118,16 @@ assets/                 Fonts, app icons, splash
 
 ## Backend: AI Pipeline
 
-All AI logic is in `backend/api/process.ts`. Input: `{ videoUrl, voiceNoteBase64, platform }`.
+All AI logic is in `backend/api/process.ts`. Input: `{ videoUrl, platform }`.
 
-| Step | Service | Used for |
+| Step | Service | Purpose |
 |------|---------|---------|
-| 1. Video transcript | Supadata API | All platforms; YouTube returns timestamped segments |
-| 2. Voice transcription | OpenAI Whisper (`whisper-1`) | TikTok/Instagram only (when voice note present) |
-| 3. Key learnings | Claude Haiku (`claude-haiku-4-5-20251001`) | TikTok/Instagram: 3–5 bullet learnings + topic tag |
-| 3. Supercut highlights | Claude Opus (`claude-opus-4-6`) | YouTube: timestamped highlight ranges + topic tag |
+| 1. Video transcript | Supadata API | YouTube: joins timestamped segments; others: plain text |
+| 2. Knowledge extraction | Claude Haiku (`claude-haiku-4-5-20251001`) | Outputs title, summary, category, tags, keyDetails |
 
-Helper functions in `process.ts`: `extractJSON()` (robust with fallbacks), `snapToNearest()` (aligns AI timestamps to real transcript offsets).
+Single unified pipeline — no YouTube vs. TikTok/Instagram split. `max_tokens: 1024`.
+
+Both steps are hard failures: if the transcript is empty or the AI response can't be parsed, the endpoint returns 422 and the frontend marks the entry as `failed`. The frontend has a 25s request timeout (`AbortController`) to handle backgrounding — if exceeded, the entry is also marked `failed` and retried on next launch.
 
 ---
 
@@ -139,49 +138,57 @@ Defined in `src/types.ts`. SQLite schema in `src/db/schema.ts`.
 Key `Entry` fields:
 - `source_platform`: `'tiktok' | 'instagram' | 'youtube'`
 - `processing_status`: `'pending' | 'processing' | 'completed' | 'failed'`
-- `key_learnings`: JSON string (`string[]`) — TikTok/Instagram only
-- `highlights`: JSON string (`TimestampedHighlight[]`) — YouTube only
-- `voice_note_path`: local filesystem path to `.m4a` recording
-- `video_transcript` / `voice_note_transcript`: raw strings
+- `title`: AI-generated concise title
+- `summary`: 2-3 sentence core takeaway
+- `category`: single primary category string (AI assigns to existing or creates new)
+- `tags`: JSON string (`string[]`) — multiple lowercase tags
+- `key_details`: JSON string (`KeyDetail[]`) — structured `{label, value}` pairs
+- `source_url`: original video link
+- `video_transcript`: raw transcript from Supadata
 
-`TimestampedHighlight`: `{ timestamp, endTimestamp, title, summary }` (timestamps in seconds).
+`KeyDetail`: `{ label: string; value: string }` — label is short (1-3 words), value is the detail. URL values are auto-linked in `KeyDetailRow`.
 
-Both `key_learnings` and `highlights` are stored as JSON strings in SQLite — parse with `JSON.parse()` before use.
+Both `tags` and `key_details` are stored as JSON strings in SQLite — parse with `JSON.parse()` before use.
 
 ---
 
 ## Conventions
 
-**Styling:** `StyleSheet.create()` only. No CSS-in-JS libraries. All design tokens (colors, spacing, border radii) come from `src/constants/theme.ts`. Dark theme forced via `app.json` (`userInterfaceStyle: "dark"`).
+**Styling:** `StyleSheet.create()` only. No CSS-in-JS libraries. All design tokens (colors, spacing, border radii) from `src/constants/theme.ts`. Dark theme forced via `app.json` (`userInterfaceStyle: "dark"`).
 
-**State management:** No Redux/Zustand/Context. Local `useState` in components + SQLite as source of truth. Use `useFocusEffect` to refresh data on screen focus.
+**State management:** No Redux/Zustand/Context. Local `useState` in components + SQLite as source of truth. Use `useFocusEffect` to refresh data on screen focus. Processing completion triggers real-time refresh via the `onProcessingUpdate` event emitter in `processing.ts`.
 
-**Routing:** Expo Router file-based. Params passed via `useLocalSearchParams()`. Modal screens use `animation: 'slide_from_bottom'` in `_layout.tsx`.
+**Routing:** Expo Router file-based. Params via `useLocalSearchParams()`. Modal screens use `animation: 'slide_from_bottom'` in `_layout.tsx`.
 
 **IDs:** `expo-crypto` `randomUUID()` for entry IDs.
 
-**File paths:** Voice note recordings stored in `${FileSystem.documentDirectory}recordings/recording-{timestamp}.m4a`.
-
 ---
 
-## Platform-Specific Behavior
+## Distribution
 
-| | TikTok / Instagram | YouTube |
-|--|--|--|
-| Transcript source | Supadata plain text | Supadata with timestamps |
-| Voice note | Supported, required for learnings | Not supported (hidden in UI) |
-| AI model | Claude Haiku | Claude Opus |
-| AI output | `keyLearnings[]` + `topicTag` | `highlights[]` + `topicTag` |
-| Detail screen | Bullet learnings + audio player | Embedded player + supercut mode |
-| Thumbnail | oEmbed API | `img.youtube.com/vi/{id}/hqdefault.jpg` |
+TestFlight is configured. Internal and external tester groups exist in App Store Connect.
+
+**To ship a new build:**
+1. In Xcode, set destination to **"Any iOS Device (arm64)"**
+2. Product → Archive
+3. Organizer → Distribute App → **TestFlight Internal Only** → Upload
+4. Wait for Apple processing (5-30 min), then assign build to tester groups in App Store Connect
+
+**Notes:**
+- Internal testers (App Store Connect team members): no review, instant
+- External testers: first build per version requires Apple review (~24-48h); subsequent builds go through automatically
+- Export compliance answer: **"None of the algorithms"** (app only uses OS-level HTTPS, no custom encryption)
+- dSYM upload warnings during archive are harmless — build still uploads fine
 
 ---
 
 ## Known Constraints
 
-- **No authentication** — backend endpoint is open; client and server trust each other implicitly
+- **No authentication** — backend endpoint is open; no user accounts
 - **iOS-focused** — Android config exists but primary dev/testing is iPhone via dev builds
-- **No cloud sync** — all data is local SQLite; uninstalling the app loses all entries
+- **No cloud sync** — all data is local SQLite; uninstalling loses all entries
 - **Dev builds required** — Expo Go not supported (SDK 55 + native modules)
-- **Processing is fire-and-forget** — if the app is backgrounded immediately after capture, processing may not complete; retry runs on next launch
+- **Processing is fire-and-forget** — runs in an iOS background task (~30s budget). If the task is killed mid-flight, the entry stays at `processing` status; `retryFailedEntries()` resets and retries it on next foreground. The 25s client timeout ensures failures surface cleanly rather than hanging indefinitely.
+- **Background task singleton** — `modules/background-task/` tracks only one `UIBackgroundTaskIdentifier` at a time; concurrent `retryFailedEntries()` calls can leak identifiers if multiple entries are retried simultaneously
 - **App group:** `group.io.synapse.app` — required for share extension ↔ main app communication
+- **After removing packages** (`expo-audio`, `expo-haptics`, `react-native-youtube-iframe`, `react-native-webview`), run `npx expo prebuild --clean` to regenerate the native project

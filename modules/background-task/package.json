@@ -1,0 +1,6 @@
+{
+  "name": "expo-background-task",
+  "version": "1.0.0",
+  "description": "iOS background task wrapper for Synapse",
+  "main": "index.ts"
+}

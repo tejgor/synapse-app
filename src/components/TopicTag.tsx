@@ -1,43 +1,83 @@
 import React from 'react';
-import { Text, Pressable, StyleSheet } from 'react-native';
-import { colors, borderRadius, spacing } from '../constants/theme';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import Animated from 'react-native-reanimated';
+import { colors, borderRadius } from '../constants/theme';
+import { usePressAnimation } from '../utils/animations';
 
 interface TopicTagProps {
   tag: string;
+  count?: number;
   onPress?: () => void;
   active?: boolean;
 }
 
-export function TopicTag({ tag, onPress, active }: TopicTagProps) {
+const AnimatedTouchable = Animated.createAnimatedComponent(Pressable);
+
+export function TopicTag({ tag, count, onPress, active }: TopicTagProps) {
+  const { animatedStyle, onPressIn, onPressOut } = usePressAnimation(0.93);
+
   return (
-    <Pressable
+    <AnimatedTouchable
       onPress={onPress}
-      style={[styles.container, active && styles.active]}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      style={[styles.container, active && styles.active, animatedStyle]}
     >
-      <Text style={[styles.text, active && styles.activeText]}>{tag}</Text>
-    </Pressable>
+      <Text style={[styles.text, active && styles.activeText]}>
+        {tag}
+      </Text>
+      {count != null && (
+        <View style={[styles.countBadge, active && styles.countBadgeActive]}>
+          <Text style={[styles.countText, active && styles.countTextActive]}>{count}</Text>
+        </View>
+      )}
+    </AnimatedTouchable>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.accentGlow,
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 36,
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: borderRadius.sm,
+    paddingLeft: 12,
+    paddingRight: 7,
+    gap: 7,
     borderWidth: 1,
-    borderColor: 'rgba(99,102,241,0.3)',
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
+    borderColor: colors.border,
   },
   active: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    backgroundColor: colors.accentSubtle,
+    borderColor: colors.accentMuted,
   },
   text: {
-    color: colors.accentLight,
+    color: colors.textTertiary,
     fontSize: 13,
     fontWeight: '600',
+    letterSpacing: -0.1,
   },
   activeText: {
     color: colors.text,
+  },
+  countBadge: {
+    backgroundColor: colors.surfaceOverlay,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    minWidth: 22,
+    alignItems: 'center',
+  },
+  countBadgeActive: {
+    backgroundColor: 'rgba(180,154,232,0.28)',
+  },
+  countText: {
+    color: colors.textPlaceholder,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  countTextActive: {
+    color: colors.accentMuted,
   },
 });
