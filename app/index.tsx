@@ -364,7 +364,7 @@ export default function LibraryScreen() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { entries, categories, isFiltered, loading, refresh } = useEntries(debouncedSearch || undefined, activeCategory);
+  const { entries, categories, loading, refresh } = useEntries(debouncedSearch || undefined, activeCategory);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const handlePullRefresh = useCallback(async () => {
@@ -446,7 +446,7 @@ export default function LibraryScreen() {
   const listHeader = useMemo(() => (
     !isSearching ? (
       <View>
-        <StatsBar count={entries.length} cats={categories.length} />
+        <StatsBar count={categories.reduce((s, c) => s + c.count, 0)} cats={categories.length} />
         {heroEntry && (
           <HeroCard
             entry={heroEntry}
@@ -460,7 +460,7 @@ export default function LibraryScreen() {
         )}
       </View>
     ) : null
-  ), [isSearching, entries.length, categories.length, heroEntry, handleFailedPress, handleDelete]);
+  ), [isSearching, categories, heroEntry, handleFailedPress, handleDelete]);
 
   const listEmpty = useMemo(() => {
     if (isSearching) {
@@ -519,7 +519,6 @@ export default function LibraryScreen() {
                     ? handleFailedPress(item.id)
                     : router.push(`/entry/${item.id}`)
                 }
-                onCategoryPress={(cat) => setActiveCategory((c) => c === cat ? undefined : cat)}
                 onDelete={() => handleDelete(item.id)}
               />
             )}

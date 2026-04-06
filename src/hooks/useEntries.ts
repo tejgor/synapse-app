@@ -7,7 +7,6 @@ import type { Entry } from '../types';
 interface UseEntriesReturn {
   entries: Entry[];
   categories: CategoryCount[];
-  isFiltered: boolean;
   loading: boolean;
   refresh: () => Promise<void>;
 }
@@ -15,7 +14,6 @@ interface UseEntriesReturn {
 export function useEntries(search?: string, category?: string): UseEntriesReturn {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [categories, setCategories] = useState<CategoryCount[]>([]);
-  const [isFiltered, setIsFiltered] = useState(false);
   const [loading, setLoading] = useState(true);
   const hasFetched = useRef(false);
 
@@ -26,7 +24,6 @@ export function useEntries(search?: string, category?: string): UseEntriesReturn
         getEntries(search, category),
         getCategoriesWithCounts(),
       ]);
-      setIsFiltered(!!(search || category));
       setEntries(prev => {
         if (
           prev.length === result.length &&
@@ -67,5 +64,5 @@ export function useEntries(search?: string, category?: string): UseEntriesReturn
     return onProcessingUpdate(() => fetchEntries(false));
   }, [fetchEntries]);
 
-  return { entries, categories, isFiltered, loading, refresh };
+  return { entries, categories, loading, refresh };
 }

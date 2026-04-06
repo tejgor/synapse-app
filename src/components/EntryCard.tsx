@@ -36,7 +36,6 @@ interface EntryCardProps {
   entry: Entry;
   onPress: () => void;
   onDelete?: () => void;
-  onCategoryPress?: (category: string) => void;
   index?: number;
   variant?: CardVariant;
   skipEntrance?: boolean;
@@ -60,7 +59,7 @@ function ProcessingDot() {
 }
 
 export function EntryCard({
-  entry, onPress, onDelete, onCategoryPress, index = 0, variant = 'standard', skipEntrance = false,
+  entry, onPress, onDelete, index = 0, variant = 'standard', skipEntrance = false,
 }: EntryCardProps) {
   const swipeableRef = useRef<SwipeableMethods>(null);
   const crystalStyle = useCrystallizeStaggered(index, skipEntrance);
