@@ -88,7 +88,8 @@ export function EntryCard({
   // ── Compact variant ──────────────────────────────────────────────────────
   if (variant === 'compact') {
     return (
-      <ReAnimated.View style={[styles.compactWrapper, crystalStyle]} exiting={FadeOut.duration(200)}>
+      <ReAnimated.View exiting={FadeOut.duration(200)}>
+      <ReAnimated.View style={[styles.compactWrapper, crystalStyle]}>
         <ReanimatedSwipeable
           ref={swipeableRef}
           renderRightActions={renderRightActions}
@@ -114,12 +115,14 @@ export function EntryCard({
           </AnimatedPressable>
         </ReanimatedSwipeable>
       </ReAnimated.View>
+      </ReAnimated.View>
     );
   }
 
   // ── Standard variant ─────────────────────────────────────────────────────
   return (
-    <ReAnimated.View style={[styles.standardWrapper, crystalStyle]} exiting={FadeOut.duration(200)}>
+    <ReAnimated.View exiting={FadeOut.duration(200)}>
+    <ReAnimated.View style={[styles.standardWrapper, crystalStyle]}>
       <ReanimatedSwipeable
         ref={swipeableRef}
         renderRightActions={renderRightActions}
@@ -183,6 +186,7 @@ export function EntryCard({
           </View>
         </AnimatedPressable>
       </ReanimatedSwipeable>
+    </ReAnimated.View>
     </ReAnimated.View>
   );
 }
