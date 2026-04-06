@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Linking,
   ActivityIndicator,
+  Alert,
   Dimensions,
 } from 'react-native';
 import Animated, {
@@ -21,7 +22,8 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   colors, spacing, borderRadius, shadows, typography, animation, categoryColor, categoryTint,
 } from '@/src/constants/theme';
-import { getEntryById } from '@/src/db/entries';
+import { getEntryById, updateEntry, renameCategory } from '@/src/db/entries';
+import { notifyUpdate } from '@/src/services/processing';
 import type { Entry, KeyDetail, ContentSection, ContentItem } from '@/src/types';
 import { usePressAnimation } from '@/src/utils/animations';
 import { useCrystallize } from '@/src/utils/useCrystallize';
@@ -302,10 +304,55 @@ export default function DetailScreen() {
   const [entry, setEntry] = useState<Entry | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const reload = useCallback(() => {
+    if (!id) return;
+    getEntryById(id).then(setEntry);
+  }, [id]);
+
   useEffect(() => {
     if (!id) return;
     getEntryById(id).then(setEntry).finally(() => setLoading(false));
   }, [id]);
+
+  const handleEditCategory = useCallback(() => {
+    if (!entry?.category || !id) return;
+    const oldCategory = entry.category;
+
+    Alert.prompt(
+      'Edit Category',
+      'Enter a new category name',
+      (newCategory) => {
+        const trimmed = newCategory.trim();
+        if (!trimmed || trimmed === oldCategory) return;
+
+        Alert.alert(
+          'Apply to...',
+          `Rename "${oldCategory}" to "${trimmed}"`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Just this entry',
+              onPress: async () => {
+                await updateEntry(id, { category: trimmed });
+                reload();
+                notifyUpdate();
+              },
+            },
+            {
+              text: `All "${oldCategory}" entries`,
+              onPress: async () => {
+                await renameCategory(oldCategory, trimmed);
+                reload();
+                notifyUpdate();
+              },
+            },
+          ],
+        );
+      },
+      'plain-text',
+      oldCategory,
+    );
+  }, [entry?.category, id, reload]);
 
   // Crystallization delays for each section
   const titleCrystal = useCrystallize({ delay: 80, seed: 1 });
@@ -351,10 +398,13 @@ export default function DetailScreen() {
         {(entry.category || entry.content_type) && (
           <Animated.View style={[styles.catRow, dateCrystal]}>
             {entry.category && (
-              <View style={[styles.catPill, { backgroundColor: `${catColor}22` }]}>
-                <View style={[styles.catDot, { backgroundColor: catColor }]} />
-                <Text style={[styles.catLabel, { color: catColor }]}>{entry.category}</Text>
-              </View>
+              <Pressable onPress={handleEditCategory} hitSlop={6}>
+                <View style={[styles.catPill, { backgroundColor: `${catColor}22` }]}>
+                  <View style={[styles.catDot, { backgroundColor: catColor }]} />
+                  <Text style={[styles.catLabel, { color: catColor }]}>{entry.category}</Text>
+                  <Ionicons name="pencil" size={10} color={`${catColor}88`} />
+                </View>
+              </Pressable>
             )}
             {entry.content_type && (
               <View style={styles.typeBadge}>
@@ -504,7 +554,7 @@ const styles = StyleSheet.create({
   loading: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
 
   // Header
-  catRow: { flexDirection: 'row', alignItems: 'center' },
+  catRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   catPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -512,9 +562,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     gap: 5,
+    flexShrink: 1,
   },
   catDot: { width: 8, height: 8, borderRadius: 4 },
-  catLabel: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
+  catLabel: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2, flexShrink: 1 },
   title: {
     color: colors.text,
     fontSize: 32,

@@ -7,7 +7,9 @@ const REQUEST_TIMEOUT_MS = 60_000;
 
 export async function processEntry(
   videoUrl: string,
-  platform?: SourcePlatform
+  platform?: SourcePlatform,
+  existingCategories?: string[],
+  existingTags?: string[],
 ): Promise<ProcessResponse> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -20,7 +22,7 @@ export async function processEntry(
         'Content-Type': 'application/json',
         ...(API_SECRET ? { 'X-API-Key': API_SECRET } : {}),
       },
-      body: JSON.stringify({ videoUrl, platform }),
+      body: JSON.stringify({ videoUrl, platform, existingCategories, existingTags }),
       signal: controller.signal,
     });
   } catch (err: any) {

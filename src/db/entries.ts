@@ -91,6 +91,16 @@ export async function clearAllEntries(): Promise<void> {
   await db.runAsync('DELETE FROM entries');
 }
 
+export async function renameCategory(oldName: string, newName: string): Promise<number> {
+  const db = await getDatabase();
+  const result = await db.runAsync(
+    'UPDATE entries SET category = ? WHERE category = ?',
+    newName,
+    oldName,
+  );
+  return result.changes;
+}
+
 export async function getPendingEntries(): Promise<Entry[]> {
   const db = await getDatabase();
   return db.getAllAsync<Entry>(
@@ -104,4 +114,19 @@ export async function getCategories(): Promise<string[]> {
     `SELECT category FROM entries WHERE category IS NOT NULL GROUP BY category ORDER BY COUNT(*) DESC`
   );
   return rows.map((r) => r.category);
+}
+
+export async function getTags(): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ tags: string }>(
+    `SELECT tags FROM entries WHERE tags IS NOT NULL AND tags != '[]'`
+  );
+  const tagSet = new Set<string>();
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.tags) as string[];
+      for (const t of parsed) tagSet.add(t);
+    } catch {}
+  }
+  return [...tagSet].sort();
 }

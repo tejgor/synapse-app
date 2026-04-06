@@ -3,6 +3,8 @@ import type { Request, Response } from 'express';
 interface ProcessRequest {
   videoUrl: string;
   platform?: string;
+  existingCategories?: string[];
+  existingTags?: string[];
 }
 
 interface KeyDetail {
@@ -150,7 +152,7 @@ export default async function handler(req: Request, res: Response) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const { videoUrl, platform } = req.body as ProcessRequest;
+  const { videoUrl, platform, existingCategories, existingTags } = req.body as ProcessRequest;
 
   if (!videoUrl) {
     return res.status(400).json({ error: 'videoUrl is required' });
@@ -214,7 +216,7 @@ export default async function handler(req: Request, res: Response) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 2048,
-        messages: [{ role: 'user', content: buildKnowledgePrompt(transcript, videoUrl, metadata ?? undefined) }],
+        messages: [{ role: 'user', content: buildKnowledgePrompt(transcript, videoUrl, metadata ?? undefined, existingCategories, existingTags) }],
       }),
       signal: claudeAbort.signal,
     });
@@ -282,10 +284,20 @@ export default async function handler(req: Request, res: Response) {
 function buildKnowledgePrompt(
   videoTranscript: string,
   sourceUrl: string,
-  metadata?: { originalTitle?: string | null; description?: string | null; authorName?: string | null }
+  metadata?: { originalTitle?: string | null; description?: string | null; authorName?: string | null },
+  existingCategories?: string[],
+  existingTags?: string[],
 ): string {
   const metaBlock = metadata && (metadata.originalTitle || metadata.description || metadata.authorName)
     ? `\nVideo metadata:${metadata.originalTitle ? `\n- Title: ${metadata.originalTitle}` : ''}${metadata.authorName ? `\n- Creator: ${metadata.authorName}` : ''}${metadata.description ? `\n- Description: ${metadata.description.slice(0, 500)}` : ''}\n`
+    : '';
+
+  const categoryBlock = existingCategories && existingCategories.length > 0
+    ? `\nThe user's library already has these categories: ${existingCategories.join(', ')}\nStrongly prefer assigning to one of these existing categories. Only create a new category if none reasonably fit this content.\n`
+    : '';
+
+  const tagBlock = existingTags && existingTags.length > 0
+    ? `\nExisting tags in the user's library: ${existingTags.join(', ')}\nPrefer reusing existing tags where they fit. You may still create new tags when needed.\n`
     : '';
 
   return `You are a knowledge extraction assistant. Given a video transcript, extract structured, actionable knowledge — not just a summary, but something genuinely useful to reference later.
@@ -294,7 +306,7 @@ Transcript:
 ${videoTranscript}
 
 Source URL: ${sourceUrl}
-
+${categoryBlock}${tagBlock}
 STEP 1 — Classify the content type. Choose the best fit or create your own short label (1-2 words):
 Common types: Tutorial, Review, Quick Tip, Recipe, Explainer, Resource List, Opinion, Comparison, Walkthrough, Demo, News, Story
 

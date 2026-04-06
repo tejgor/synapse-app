@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { getEntryById, updateEntry, getPendingEntries } from '../db/entries';
+import { getEntryById, updateEntry, getPendingEntries, getCategories, getTags } from '../db/entries';
 import { processEntry as callProcessAPI } from './api';
 import type { ProcessResponse } from '../types';
 
@@ -25,7 +25,7 @@ export function onProcessingUpdate(fn: Listener) {
   return () => { listeners.delete(fn); };
 }
 
-function notifyUpdate() {
+export function notifyUpdate() {
   listeners.forEach((fn) => fn());
 }
 
@@ -90,10 +90,12 @@ export async function processEntry(entryId: string): Promise<void> {
     return;
   }
 
+  const [existingCategories, existingTags] = await Promise.all([getCategories(), getTags()]);
+
   if (Platform.OS === 'ios' && BackgroundRequest) {
     // Hand off to iOS background URLSession — no time limit, survives suspension/termination
     const apiUrl = `${process.env.EXPO_PUBLIC_API_URL}/api/process`;
-    const bodyJson = JSON.stringify({ videoUrl: entry.source_url, platform: entry.source_platform });
+    const bodyJson = JSON.stringify({ videoUrl: entry.source_url, platform: entry.source_platform, existingCategories, existingTags });
     const apiSecret = process.env.EXPO_PUBLIC_API_SECRET;
     const headersJson = JSON.stringify(apiSecret ? { 'X-API-Key': apiSecret } : {});
     console.log(`[processing] handing off to background URLSession url=${entry.source_url}`);
@@ -102,7 +104,7 @@ export async function processEntry(entryId: string): Promise<void> {
     // Foreground fallback (Android / development)
     try {
       console.log(`[processing] calling API (foreground) url=${entry.source_url}`);
-      const result = await callProcessAPI(entry.source_url, entry.source_platform);
+      const result = await callProcessAPI(entry.source_url, entry.source_platform, existingCategories, existingTags);
       await updateEntry(entryId, {
         video_transcript: result.videoTranscript,
         title: result.title,
