@@ -30,7 +30,7 @@ export function useEntries(search?: string, category?: string): UseEntriesReturn
       setEntries(prev => {
         if (
           prev.length === result.length &&
-          prev.every((e, i) => e.id === result[i].id)
+          prev.every((e, i) => e.id === result[i].id && e.processing_status === result[i].processing_status)
         ) {
           return prev;
         }

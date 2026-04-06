@@ -164,6 +164,24 @@ Both `tags` and `key_details` are stored as JSON strings in SQLite — parse wit
 
 ---
 
+## Distribution
+
+TestFlight is configured. Internal and external tester groups exist in App Store Connect.
+
+**To ship a new build:**
+1. In Xcode, set destination to **"Any iOS Device (arm64)"**
+2. Product → Archive
+3. Organizer → Distribute App → **TestFlight Internal Only** → Upload
+4. Wait for Apple processing (5-30 min), then assign build to tester groups in App Store Connect
+
+**Notes:**
+- Internal testers (App Store Connect team members): no review, instant
+- External testers: first build per version requires Apple review (~24-48h); subsequent builds go through automatically
+- Export compliance answer: **"None of the algorithms"** (app only uses OS-level HTTPS, no custom encryption)
+- dSYM upload warnings during archive are harmless — build still uploads fine
+
+---
+
 ## Known Constraints
 
 - **No authentication** — backend endpoint is open; no user accounts
