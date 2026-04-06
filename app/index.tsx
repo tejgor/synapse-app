@@ -37,6 +37,12 @@ import type { Entry } from '@/src/types';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
+const PLATFORM_FALLBACK_TITLES: Record<string, string> = {
+  tiktok: 'TikTok Video',
+  instagram: 'Instagram Reel',
+  youtube: 'YouTube Video',
+};
+
 function groupEntries(entries: Entry[]) {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -121,12 +127,20 @@ function HeroCard({
         <View style={styles.heroTitleRow}>
           <View style={[styles.heroAccentBar, { backgroundColor: catColor }]} />
           <View style={styles.heroTitleBlock}>
-            {entry.title ? (
-              <Text style={styles.heroTitle} numberOfLines={3}>{entry.title}</Text>
-            ) : isProcessing ? (
+            {isProcessing ? (
               <Text style={styles.heroProcessing}>Extracting knowledge...</Text>
-            ) : entry.processing_status === 'failed' ? (
-              <Text style={styles.heroFailed}>Analysis failed</Text>
+            ) : (entry.title || entry.processing_status === 'failed') ? (
+              <>
+                <Text style={styles.heroTitle} numberOfLines={3}>
+                  {entry.title || PLATFORM_FALLBACK_TITLES[entry.source_platform] || 'Untitled Video'}
+                </Text>
+                {entry.processing_status === 'failed' && (
+                  <View style={styles.heroFailedBadge}>
+                    <Ionicons name="alert-circle-outline" size={13} color={colors.textTertiary} />
+                    <Text style={styles.heroFailedLabel}>Processing failed</Text>
+                  </View>
+                )}
+              </>
             ) : null}
           </View>
         </View>
@@ -328,23 +342,6 @@ export default function LibraryScreen() {
     );
   }, [refresh]);
 
-  const handleFailedPress = useCallback((id: string) => {
-    Alert.alert('Analysis failed', 'Would you like to retry or remove this entry?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove', style: 'destructive',
-        onPress: async () => { await deleteEntry(id); refresh(); },
-      },
-      {
-        text: 'Retry',
-        onPress: async () => {
-          await updateEntry(id, { processing_status: 'pending' });
-          refresh();
-          processEntry(id);
-        },
-      },
-    ]);
-  }, [refresh]);
 
   const heroIndex = entries.findIndex((e) => e.processing_status === 'completed');
   const heroEntry = heroIndex >= 0 ? entries[heroIndex] : null;
@@ -366,7 +363,7 @@ export default function LibraryScreen() {
   );
 
   const isSearching = search.length > 0;
-  const showEmpty = entries.length === 0 && !loading;
+  const showEmpty = entries.length === 0 && !loading && !isSearching;
 
   const listData: Section[] = isSearching
     ? [{ title: '', data: entries, variant: 'standard' }]
@@ -387,11 +384,7 @@ export default function LibraryScreen() {
               entry={item}
               index={index + 1}
               variant={(section as Section).variant}
-              onPress={() =>
-              item.processing_status === 'failed'
-                ? handleFailedPress(item.id)
-                : router.push(`/entry/${item.id}`)
-            }
+              onPress={() => router.push(`/entry/${item.id}`)}
               onCategoryPress={(cat) => setActiveCategory((c) => c === cat ? undefined : cat)}
               onDelete={() => handleDelete(item.id)}
             />
@@ -420,11 +413,7 @@ export default function LibraryScreen() {
               {!isSearching && heroEntry && (
                 <HeroCard
                   entry={heroEntry}
-                  onPress={() =>
-                    heroEntry.processing_status === 'failed'
-                      ? handleFailedPress(heroEntry.id)
-                      : router.push(`/entry/${heroEntry.id}`)
-                  }
+                  onPress={() => router.push(`/entry/${heroEntry.id}`)}
                   onDelete={() => handleDelete(heroEntry.id)}
                 />
               )}
@@ -551,7 +540,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   heroProcessing: { color: colors.textTertiary, fontSize: 18, fontStyle: 'italic' },
-  heroFailed: { color: colors.error, fontSize: 18, fontStyle: 'italic' },
+  heroFailedBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
+  heroFailedLabel: { color: colors.textTertiary, fontSize: 12, fontWeight: '500' },
   heroSummary: {
     color: colors.textSecondary,
     fontSize: 16,

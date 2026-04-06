@@ -47,6 +47,12 @@ const PLATFORM_ICONS: Record<string, string> = {
   youtube: 'logo-youtube',
 };
 
+const PLATFORM_FALLBACK_TITLES: Record<string, string> = {
+  tiktok: 'TikTok Video',
+  instagram: 'Instagram Reel',
+  youtube: 'YouTube Video',
+};
+
 function ProcessingDot() {
   const pulseStyle = usePulse();
   return <ReAnimated.View style={[styles.processingDot, pulseStyle]} />;
@@ -96,7 +102,7 @@ export function EntryCard({
           >
             <View style={[styles.compactDot, { backgroundColor: catColor }]} />
             <Text style={styles.compactTitle} numberOfLines={1}>
-              {entry.title || (isProcessing ? 'Extracting knowledge...' : entry.processing_status === 'failed' ? 'Analysis failed' : 'Untitled')}
+              {entry.title || (isProcessing ? 'Extracting knowledge...' : entry.processing_status === 'failed' ? (PLATFORM_FALLBACK_TITLES[entry.source_platform] || 'Untitled Video') : 'Untitled')}
             </Text>
             <View style={styles.compactRight}>
               {platformIcon && (
@@ -141,11 +147,19 @@ export function EntryCard({
             )}
 
             {/* Title */}
-            {entry.title ? (
-              <Text style={styles.title} numberOfLines={2}>{entry.title}</Text>
-            ) : entry.processing_status === 'failed' ? (
-              <Text style={styles.failedText}>Processing failed — tap to view</Text>
-            ) : null}
+            {(entry.title || entry.processing_status === 'failed') && (
+              <>
+                <Text style={styles.title} numberOfLines={2}>
+                  {entry.title || PLATFORM_FALLBACK_TITLES[entry.source_platform] || 'Untitled Video'}
+                </Text>
+                {entry.processing_status === 'failed' && (
+                  <View style={styles.failedRow}>
+                    <Ionicons name="alert-circle-outline" size={12} color={colors.textTertiary} />
+                    <Text style={styles.failedLabel}>Processing failed</Text>
+                  </View>
+                )}
+              </>
+            )}
 
             {/* Summary */}
             {entry.summary ? (
@@ -254,7 +268,8 @@ const styles = StyleSheet.create({
     color: colors.textPlaceholder,
     fontSize: 10,
   },
-  failedText: { color: colors.error, fontSize: 13 },
+  failedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  failedLabel: { color: colors.textTertiary, fontSize: 11, fontWeight: '500' },
   processingDot: {
     width: 8,
     height: 8,

@@ -5,6 +5,15 @@ const API_SECRET = process.env.EXPO_PUBLIC_API_SECRET || '';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
+export class ApiError extends Error {
+  metadata: ProcessResponse['metadata'] | null;
+  constructor(message: string, metadata: ProcessResponse['metadata'] | null = null) {
+    super(message);
+    this.name = 'ApiError';
+    this.metadata = metadata;
+  }
+}
+
 export async function processEntry(
   videoUrl: string,
   platform?: SourcePlatform,
@@ -27,7 +36,7 @@ export async function processEntry(
     });
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      throw new Error('Request timed out after 60s');
+      throw new ApiError('Request timed out after 60s');
     }
     throw err;
   } finally {
@@ -35,18 +44,21 @@ export async function processEntry(
   }
 
   if (!response.ok) {
-    let detail = '';
-    try { detail = await response.text(); } catch {}
-    throw new Error(`Processing failed: ${response.status}${detail ? ` — ${detail.slice(0, 200)}` : ''}`);
+    let metadata: ProcessResponse['metadata'] | null = null;
+    try {
+      const body = await response.json() as { error?: string; metadata?: ProcessResponse['metadata'] };
+      metadata = body.metadata ?? null;
+    } catch {}
+    throw new ApiError(`Processing failed: ${response.status}`, metadata);
   }
 
   const text = await response.text();
   if (!text) {
-    throw new Error('Empty response from server');
+    throw new ApiError('Empty response from server');
   }
   try {
     return JSON.parse(text) as ProcessResponse;
   } catch {
-    throw new Error(`Invalid JSON response: ${text.slice(0, 200)}`);
+    throw new ApiError(`Invalid JSON response: ${text.slice(0, 200)}`);
   }
 }

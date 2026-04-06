@@ -17,13 +17,13 @@ import Animated, {
   withSpring,
   interpolate,
 } from 'react-native-reanimated';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
   colors, spacing, borderRadius, shadows, typography, animation, categoryColor, categoryTint,
 } from '@/src/constants/theme';
-import { getEntryById, updateEntry, renameCategory } from '@/src/db/entries';
-import { notifyUpdate } from '@/src/services/processing';
+import { getEntryById, updateEntry, deleteEntry, renameCategory } from '@/src/db/entries';
+import { notifyUpdate, onProcessingUpdate, processEntry } from '@/src/services/processing';
 import type { Entry, KeyDetail, ContentSection, ContentItem } from '@/src/types';
 import { usePressAnimation } from '@/src/utils/animations';
 import { useCrystallize } from '@/src/utils/useCrystallize';
@@ -314,6 +314,8 @@ export default function DetailScreen() {
     getEntryById(id).then(setEntry).finally(() => setLoading(false));
   }, [id]);
 
+  useEffect(() => onProcessingUpdate(reload), [reload]);
+
   const handleEditCategory = useCallback(() => {
     if (!entry?.category || !id) return;
     const oldCategory = entry.category;
@@ -353,6 +355,29 @@ export default function DetailScreen() {
       oldCategory,
     );
   }, [entry?.category, id, reload]);
+
+  const handleRetry = useCallback(async () => {
+    if (!id) return;
+    await updateEntry(id, { processing_status: 'pending' });
+    reload();
+    processEntry(id);
+  }, [id, reload]);
+
+  const handleRemove = useCallback(() => {
+    if (!id) return;
+    Alert.alert('Remove entry', "This can't be undone.", [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteEntry(id);
+          notifyUpdate();
+          router.back();
+        },
+      },
+    ]);
+  }, [id]);
 
   // Crystallization delays for each section
   const titleCrystal = useCrystallize({ delay: 80, seed: 1 });
@@ -416,8 +441,10 @@ export default function DetailScreen() {
         )}
 
         {/* ── Title — biggest element, crystallizes first ── */}
-        {entry.title && (
-          <Animated.Text style={[styles.title, titleCrystal]}>{entry.title}</Animated.Text>
+        {(entry.title || entry.processing_status === 'failed') && (
+          <Animated.Text style={[styles.title, titleCrystal]}>
+            {entry.title || (entry.source_platform === 'tiktok' ? 'TikTok Video' : entry.source_platform === 'instagram' ? 'Instagram Reel' : 'YouTube Video')}
+          </Animated.Text>
         )}
 
         {/* ── Date in SpaceMono ── */}
@@ -426,6 +453,13 @@ export default function DetailScreen() {
             ? `published ${new Date(entry.published_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} · saved ${date}`
             : `saved ${date}`}
         </Animated.Text>
+
+        {/* ── Source URL link for failed entries ── */}
+        {entry.processing_status === 'failed' && (
+          <Pressable onPress={() => Linking.openURL(entry.source_url)}>
+            <Text style={styles.failedSourceLink} numberOfLines={2}>{entry.source_url}</Text>
+          </Pressable>
+        )}
 
         {/* ── Video metadata row (author, duration, views, likes) ── */}
         {(entry.author_name || entry.duration != null || entry.view_count != null || entry.like_count != null) && (
@@ -486,9 +520,21 @@ export default function DetailScreen() {
           </View>
         )}
         {entry.processing_status === 'failed' && (
-          <View style={[styles.banner, { backgroundColor: colors.errorSubtle }]}>
-            <Ionicons name="warning-outline" size={15} color={colors.error} />
-            <Text style={[styles.bannerText, { color: colors.error }]}>Processing failed.</Text>
+          <View style={styles.failedSection}>
+            <View style={[styles.banner, { backgroundColor: colors.errorSubtle }]}>
+              <Ionicons name="warning-outline" size={15} color={colors.error} />
+              <Text style={[styles.bannerText, { color: colors.error }]}>Processing failed.</Text>
+            </View>
+            <View style={styles.failedActions}>
+              <Pressable style={styles.retryButton} onPress={handleRetry}>
+                <Ionicons name="refresh-outline" size={16} color={colors.accent} />
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </Pressable>
+              <Pressable style={styles.removeButton} onPress={handleRemove}>
+                <Ionicons name="trash-outline" size={16} color={colors.error} />
+                <Text style={styles.removeButtonText}>Remove</Text>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -614,6 +660,28 @@ const styles = StyleSheet.create({
     padding: spacing.md, ...shadows.sm,
   },
   bannerText: { color: colors.textSecondary, ...typography.caption },
+
+  // Failed entry actions
+  failedSourceLink: {
+    color: colors.accentMuted,
+    fontSize: 13,
+    textDecorationLine: 'underline',
+    marginTop: 4,
+  },
+  failedSection: { gap: 12 },
+  failedActions: { flexDirection: 'row', gap: 12 },
+  retryButton: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.accentSubtle, borderRadius: borderRadius.md, paddingVertical: 14,
+    borderWidth: 1, borderColor: colors.accent,
+  },
+  retryButtonText: { color: colors.accent, fontSize: 14, fontWeight: '600' },
+  removeButton: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.errorSubtle, borderRadius: borderRadius.md, paddingVertical: 14,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.error,
+  },
+  removeButtonText: { color: colors.error, fontSize: 14, fontWeight: '600' },
 
   // Divider
   divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 },

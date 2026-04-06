@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { getEntryById, updateEntry, getPendingEntries, getCategories, getTags } from '../db/entries';
-import { processEntry as callProcessAPI } from './api';
+import { processEntry as callProcessAPI, ApiError } from './api';
 import type { ProcessResponse } from '../types';
 
 // Background request module — iOS only
@@ -41,7 +41,23 @@ export async function handleBackgroundResult(event: {
 
   if (error || !response || statusCode !== 200) {
     console.error(`[processing] background result failed entryId=${entryId} error=${error ?? `HTTP ${statusCode}`}`);
-    await updateEntry(entryId, { processing_status: 'failed' });
+    let meta: ProcessResponse['metadata'] | null = null;
+    if (response) {
+      try { meta = (JSON.parse(response) as { metadata?: ProcessResponse['metadata'] }).metadata ?? null; } catch {}
+    }
+    await updateEntry(entryId, {
+      processing_status: 'failed',
+      ...(meta ? {
+        title: meta.originalTitle ?? null,
+        author_name: meta.authorName,
+        author_username: meta.authorUsername,
+        thumbnail_url: meta.thumbnailUrl,
+        duration: meta.duration,
+        view_count: meta.viewCount,
+        like_count: meta.likeCount,
+        published_at: meta.publishedAt,
+      } : {}),
+    });
     notifyUpdate();
     return;
   }
@@ -128,7 +144,20 @@ export async function processEntry(entryId: string): Promise<void> {
       console.log(`[processing] completed entryId=${entryId} title="${result.title}" contentType="${result.contentType}"`);
     } catch (err) {
       console.error(`[processing] failed entryId=${entryId}:`, err);
-      await updateEntry(entryId, { processing_status: 'failed' });
+      const meta = err instanceof ApiError ? err.metadata : null;
+      await updateEntry(entryId, {
+        processing_status: 'failed',
+        ...(meta ? {
+          title: meta.originalTitle ?? null,
+          author_name: meta.authorName,
+          author_username: meta.authorUsername,
+          thumbnail_url: meta.thumbnailUrl,
+          duration: meta.duration,
+          view_count: meta.viewCount,
+          like_count: meta.likeCount,
+          published_at: meta.publishedAt,
+        } : {}),
+      });
     }
     notifyUpdate();
   }

@@ -187,7 +187,8 @@ export default async function handler(req: Request, res: Response) {
     } catch (retryErr: any) {
       const msg = retryErr?.name === 'AbortError' ? `Transcript fetch timed out on retry (${SUPADATA_RETRY_TIMEOUT_MS / 1000}s)` : (retryErr instanceof Error ? retryErr.message : 'Transcript fetch failed');
       log('transcript', `RETRY FAILED — ${msg}`);
-      return res.status(422).json({ error: msg });
+      const partialMetadata = metadataResult.status === 'fulfilled' ? metadataResult.value : null;
+      return res.status(422).json({ error: msg, metadata: partialMetadata });
     }
   } else {
     transcript = transcriptResult.value;
@@ -227,7 +228,7 @@ export default async function handler(req: Request, res: Response) {
       const body = await claudeRes.text();
       const detail = body.trimStart().startsWith('<') ? 'HTML error page' : body.slice(0, 120);
       log('extraction', `FAILED — Claude ${claudeRes.status}: ${detail}`);
-      return res.status(422).json({ error: `AI extraction failed (${claudeRes.status})` });
+      return res.status(422).json({ error: `AI extraction failed (${claudeRes.status})`, metadata });
     }
 
     const data = await claudeRes.json() as { content: { text: string }[]; stop_reason?: string };
@@ -241,7 +242,7 @@ export default async function handler(req: Request, res: Response) {
 
     if (!parsed || !parsed.title) {
       log('extraction', `FAILED — could not parse JSON. Raw: ${raw.slice(0, 300)}`);
-      return res.status(422).json({ error: 'AI extraction returned invalid data' });
+      return res.status(422).json({ error: 'AI extraction returned invalid data', metadata });
     }
 
     // Build sections: prefer new format, fall back to wrapping legacy keyDetails
@@ -277,7 +278,7 @@ export default async function handler(req: Request, res: Response) {
       ? `AI extraction timed out (${CLAUDE_TIMEOUT_MS / 1000}s)`
       : `AI extraction failed — ${err}`;
     log('extraction', `FAILED — ${msg}`);
-    return res.status(422).json({ error: msg });
+    return res.status(422).json({ error: msg, metadata });
   }
 }
 
