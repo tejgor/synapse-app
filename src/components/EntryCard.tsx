@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import ReanimatedSwipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Ionicons } from '@expo/vector-icons';
-import ReAnimated, { useAnimatedStyle, interpolate, Extrapolation } from 'react-native-reanimated';
+import ReAnimated, { useAnimatedStyle, interpolate, Extrapolation, FadeOut } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import {
   colors, borderRadius, spacing, shadows, typography, categoryColor, categoryTint, platformColors,
@@ -88,7 +88,7 @@ export function EntryCard({
   // ── Compact variant ──────────────────────────────────────────────────────
   if (variant === 'compact') {
     return (
-      <ReAnimated.View style={[styles.compactWrapper, crystalStyle]}>
+      <ReAnimated.View style={[styles.compactWrapper, crystalStyle]} exiting={FadeOut.duration(200)}>
         <ReanimatedSwipeable
           ref={swipeableRef}
           renderRightActions={renderRightActions}
@@ -119,7 +119,7 @@ export function EntryCard({
 
   // ── Standard variant ─────────────────────────────────────────────────────
   return (
-    <ReAnimated.View style={[styles.standardWrapper, crystalStyle]}>
+    <ReAnimated.View style={[styles.standardWrapper, crystalStyle]} exiting={FadeOut.duration(200)}>
       <ReanimatedSwipeable
         ref={swipeableRef}
         renderRightActions={renderRightActions}

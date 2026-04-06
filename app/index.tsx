@@ -17,6 +17,10 @@ import Animated, {
   interpolateColor,
   interpolate,
   Extrapolation,
+  FadeIn,
+  FadeOut,
+  FadeInDown,
+  FadeOutUp,
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
@@ -426,9 +430,9 @@ export default function LibraryScreen() {
 
   const listEmpty = useMemo(() => (
     isSearching ? (
-      <View style={styles.searchEmpty}>
+      <Animated.View style={styles.searchEmpty} entering={FadeIn.duration(300).delay(100)}>
         <Text style={styles.searchEmptyText}>No results for "{debouncedSearch}"</Text>
-      </View>
+      </Animated.View>
     ) : null
   ), [isSearching, debouncedSearch]);
 
@@ -444,9 +448,11 @@ export default function LibraryScreen() {
             <SearchBar value={search} onChangeText={setSearch} />
           </View>
           {isSearching && entries.length > 0 && (
-            <Text style={styles.searchResultLabel}>
-              {entries.length} result{entries.length !== 1 ? 's' : ''}
-            </Text>
+            <Animated.View entering={FadeInDown.duration(250)} exiting={FadeOutUp.duration(200)}>
+              <Text style={styles.searchResultLabel}>
+                {entries.length} result{entries.length !== 1 ? 's' : ''}
+              </Text>
+            </Animated.View>
           )}
           <SectionList
             sections={listData}

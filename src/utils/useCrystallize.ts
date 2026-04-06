@@ -26,12 +26,18 @@ export function useCrystallize({ delay = 0, seed = 0, skip = false }: Crystalliz
   const jitterX = skip ? 0 : ((seed * 2654435761) % 16) - 8;
   const jitterY = skip ? 0 : ((seed * 2246822519) % 8) - 4;
 
-  const opacity = useSharedValue(skip ? 1 : 0);
+  const opacity = useSharedValue(0);
   const translateX = useSharedValue(jitterX);
-  const translateY = useSharedValue(jitterY);
+  const translateY = useSharedValue(skip ? 6 : jitterY);
 
   useEffect(() => {
-    if (skip) return;
+    if (skip) {
+      // Clean fade + subtle slide up — no scatter
+      const timingOpts = { duration: 280, easing: Easing.out(Easing.cubic) };
+      opacity.value = withDelay(delay, withTiming(1, timingOpts));
+      translateY.value = withDelay(delay, withTiming(0, timingOpts));
+      return;
+    }
     const spring = { damping: 14, stiffness: 140, mass: 1 };
     const timingOpts = { duration: 350, easing: Easing.out(Easing.cubic) };
     opacity.value = withDelay(delay, withTiming(1, timingOpts));
@@ -54,7 +60,7 @@ export function useCrystallize({ delay = 0, seed = 0, skip = false }: Crystalliz
  */
 export function useCrystallizeStaggered(index: number, skip = false) {
   return useCrystallize({
-    delay: Math.min(index * 55, 400),
+    delay: skip ? Math.min(index * 30, 200) : Math.min(index * 55, 400),
     seed: index + 1,
     skip,
   });
