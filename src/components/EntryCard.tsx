@@ -39,6 +39,7 @@ interface EntryCardProps {
   onCategoryPress?: (category: string) => void;
   index?: number;
   variant?: CardVariant;
+  skipEntrance?: boolean;
 }
 
 const PLATFORM_ICONS: Record<string, string> = {
@@ -59,10 +60,10 @@ function ProcessingDot() {
 }
 
 export function EntryCard({
-  entry, onPress, onDelete, onCategoryPress, index = 0, variant = 'standard',
+  entry, onPress, onDelete, onCategoryPress, index = 0, variant = 'standard', skipEntrance = false,
 }: EntryCardProps) {
   const swipeableRef = useRef<SwipeableMethods>(null);
-  const crystalStyle = useCrystallizeStaggered(index);
+  const crystalStyle = useCrystallizeStaggered(index, skipEntrance);
   const { animatedStyle: pressStyle, onPressIn, onPressOut } = usePressAnimation(0.975);
 
   const isProcessing =

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -313,10 +313,26 @@ type Section = { title: string; data: Entry[]; variant: 'standard' | 'compact' }
 
 export default function LibraryScreen() {
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | undefined>();
-  const { entries, loading, refresh } = useEntries(search || undefined, activeCategory);
 
-  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const { entries, isFiltered, loading, refresh } = useEntries(debouncedSearch || undefined, activeCategory);
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handlePullRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refresh();
+    setIsRefreshing(false);
+  }, [refresh]);
+
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  useFocusEffect(useCallback(() => { refreshRef.current(); }, []));
 
   const handleDelete = useCallback((id: string) => {
     Alert.alert('Delete entry', "This can't be undone.", [
@@ -342,12 +358,32 @@ export default function LibraryScreen() {
     );
   }, [refresh]);
 
+  const handleFailedPress = useCallback((id: string) => {
+    Alert.alert('Analysis failed', 'Would you like to retry or remove this entry?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove', style: 'destructive',
+        onPress: async () => { await deleteEntry(id); refresh(); },
+      },
+      {
+        text: 'Retry',
+        onPress: async () => {
+          await updateEntry(id, { processing_status: 'pending' });
+          refresh();
+          processEntry(id);
+        },
+      },
+    ]);
+  }, [refresh]);
 
-  const heroIndex = entries.findIndex((e) => e.processing_status === 'completed');
-  const heroEntry = heroIndex >= 0 ? entries[heroIndex] : null;
-  const rest = heroEntry
-    ? [...entries.slice(0, heroIndex), ...entries.slice(heroIndex + 1)]
-    : entries;
+  const { heroEntry, rest } = useMemo(() => {
+    const idx = entries.findIndex((e) => e.processing_status === 'completed');
+    if (idx < 0) return { heroEntry: null, rest: entries };
+    return {
+      heroEntry: entries[idx],
+      rest: [...entries.slice(0, idx), ...entries.slice(idx + 1)],
+    };
+  }, [entries]);
   const { today, thisWeek, earlier } = useMemo(() => groupEntries(rest), [rest]);
   const sections = useMemo<Section[]>(() => {
     const r: Section[] = [];
@@ -362,12 +398,39 @@ export default function LibraryScreen() {
     [entries]
   );
 
-  const isSearching = search.length > 0;
+  const isSearching = isFiltered;
   const showEmpty = entries.length === 0 && !loading && !isSearching;
 
   const listData: Section[] = isSearching
     ? [{ title: '', data: entries, variant: 'standard' }]
     : sections;
+
+  const listHeader = useMemo(() => (
+    !isSearching ? (
+      <View>
+        <StatsBar count={entries.length} cats={categories.length} />
+        {heroEntry && (
+          <HeroCard
+            entry={heroEntry}
+            onPress={() =>
+              heroEntry.processing_status === 'failed'
+                ? handleFailedPress(heroEntry.id)
+                : router.push(`/entry/${heroEntry.id}`)
+            }
+            onDelete={() => handleDelete(heroEntry.id)}
+          />
+        )}
+      </View>
+    ) : null
+  ), [isSearching, entries.length, categories.length, heroEntry, handleFailedPress, handleDelete]);
+
+  const listEmpty = useMemo(() => (
+    isSearching ? (
+      <View style={styles.searchEmpty}>
+        <Text style={styles.searchEmptyText}>No results for "{debouncedSearch}"</Text>
+      </View>
+    ) : null
+  ), [isSearching, debouncedSearch]);
 
   return (
     <View style={styles.container}>
@@ -376,62 +439,50 @@ export default function LibraryScreen() {
           <EmptyState onPress={() => router.push('/capture')} />
         </View>
       ) : (
-        <SectionList
-          sections={listData}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item, index, section }) => (
-            <EntryCard
-              entry={item}
-              index={index + 1}
-              variant={(section as Section).variant}
-              onPress={() => router.push(`/entry/${item.id}`)}
-              onCategoryPress={(cat) => setActiveCategory((c) => c === cat ? undefined : cat)}
-              onDelete={() => handleDelete(item.id)}
-            />
+        <>
+          <View style={styles.searchWrapper}>
+            <SearchBar value={search} onChangeText={setSearch} />
+          </View>
+          {isSearching && entries.length > 0 && (
+            <Text style={styles.searchResultLabel}>
+              {entries.length} result{entries.length !== 1 ? 's' : ''}
+            </Text>
           )}
-          renderSectionHeader={({ section }) =>
-            !isSearching && (section as Section).data.length > 0 ? (
-              <SectionHeader
-                title={(section as Section).title}
-                count={(section as Section).data.length}
+          <SectionList
+            sections={listData}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item, index, section }) => (
+              <EntryCard
+                entry={item}
+                index={index + 1}
+                variant={(section as Section).variant}
+                skipEntrance={isSearching}
+                onPress={() =>
+                  item.processing_status === 'failed'
+                    ? handleFailedPress(item.id)
+                    : router.push(`/entry/${item.id}`)
+                }
+                onCategoryPress={(cat) => setActiveCategory((c) => c === cat ? undefined : cat)}
+                onDelete={() => handleDelete(item.id)}
               />
-            ) : null
-          }
-          ListHeaderComponent={
-            <View>
-              {!isSearching && (
-                <StatsBar count={entries.length} cats={categories.length} />
-              )}
-              <View style={styles.searchWrapper}>
-                <SearchBar value={search} onChangeText={setSearch} />
-              </View>
-              {isSearching && entries.length > 0 && (
-                <Text style={styles.searchResultLabel}>
-                  {entries.length} result{entries.length !== 1 ? 's' : ''}
-                </Text>
-              )}
-              {!isSearching && heroEntry && (
-                <HeroCard
-                  entry={heroEntry}
-                  onPress={() => router.push(`/entry/${heroEntry.id}`)}
-                  onDelete={() => handleDelete(heroEntry.id)}
+            )}
+            renderSectionHeader={({ section }) =>
+              !isSearching && (section as Section).data.length > 0 ? (
+                <SectionHeader
+                  title={(section as Section).title}
+                  count={(section as Section).data.length}
                 />
-              )}
-            </View>
-          }
-          ListEmptyComponent={
-            isSearching ? (
-              <View style={styles.searchEmpty}>
-                <Text style={styles.searchEmptyText}>No results for "{search}"</Text>
-              </View>
-            ) : null
-          }
-          refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.accent} />
-          }
-          contentContainerStyle={styles.listContent}
-          stickySectionHeadersEnabled={false}
-        />
+              ) : null
+            }
+            ListHeaderComponent={listHeader}
+            ListEmptyComponent={listEmpty}
+            refreshControl={
+              <RefreshControl refreshing={isRefreshing} onRefresh={handlePullRefresh} tintColor={colors.accent} />
+            }
+            contentContainerStyle={styles.listContent}
+            stickySectionHeadersEnabled={false}
+          />
+        </>
       )}
 
       <View style={styles.fabContainer}>
