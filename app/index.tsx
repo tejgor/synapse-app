@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   SectionList,
+  ScrollView,
   StyleSheet,
   RefreshControl,
   Alert,
@@ -29,8 +30,10 @@ import {
   colors, spacing, borderRadius, shadows, typography, animation, categoryColor, categoryTint,
 } from '@/src/constants/theme';
 import { EntryCard } from '@/src/components/EntryCard';
+import { TopicTag } from '@/src/components/TopicTag';
 import { SynapsePulse } from '@/src/components/SynapsePulse';
 import { useEntries } from '@/src/hooks/useEntries';
+import type { CategoryCount } from '@/src/db/entries';
 import { deleteEntry, updateEntry, clearAllEntries } from '@/src/db/entries';
 import { processEntry } from '@/src/services/processing';
 import {
@@ -245,6 +248,42 @@ function SearchBar({ value, onChangeText }: { value: string; onChangeText: (t: s
   );
 }
 
+// ─── Category Bar ────────────────────────────────────────────────────────────
+
+function CategoryBar({
+  categories, active, onSelect,
+}: {
+  categories: CategoryCount[];
+  active: string | undefined;
+  onSelect: (cat: string | undefined) => void;
+}) {
+  if (categories.length === 0) return null;
+  const total = categories.reduce((sum, c) => sum + c.count, 0);
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.categoryBar}
+    >
+      <TopicTag
+        tag="All"
+        count={total}
+        active={!active}
+        onPress={() => onSelect(undefined)}
+      />
+      {categories.map((cat) => (
+        <TopicTag
+          key={cat.name}
+          tag={cat.name}
+          count={cat.count}
+          active={active === cat.name}
+          onPress={() => onSelect(active === cat.name ? undefined : cat.name)}
+        />
+      ))}
+    </ScrollView>
+  );
+}
+
 // ─── FAB ──────────────────────────────────────────────────────────────────────
 
 function FAB({ onPress, onLongPress }: { onPress: () => void; onLongPress: () => void }) {
@@ -325,7 +364,7 @@ export default function LibraryScreen() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { entries, isFiltered, loading, refresh } = useEntries(debouncedSearch || undefined, activeCategory);
+  const { entries, categories, isFiltered, loading, refresh } = useEntries(debouncedSearch || undefined, activeCategory);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const handlePullRefresh = useCallback(async () => {
@@ -397,13 +436,8 @@ export default function LibraryScreen() {
     return r;
   }, [today, thisWeek, earlier]);
 
-  const categories = useMemo(
-    () => [...new Set(entries.map((e) => e.category).filter(Boolean))] as string[],
-    [entries]
-  );
-
-  const isSearching = isFiltered;
-  const showEmpty = entries.length === 0 && !loading && !isSearching;
+  const isSearching = !!debouncedSearch;
+  const showEmpty = entries.length === 0 && !loading && !isSearching && !activeCategory;
 
   const listData: Section[] = isSearching
     ? [{ title: '', data: entries, variant: 'standard' }]
@@ -428,13 +462,23 @@ export default function LibraryScreen() {
     ) : null
   ), [isSearching, entries.length, categories.length, heroEntry, handleFailedPress, handleDelete]);
 
-  const listEmpty = useMemo(() => (
-    isSearching ? (
-      <Animated.View style={styles.searchEmpty} entering={FadeIn.duration(300).delay(100)}>
-        <Text style={styles.searchEmptyText}>No results for "{debouncedSearch}"</Text>
-      </Animated.View>
-    ) : null
-  ), [isSearching, debouncedSearch]);
+  const listEmpty = useMemo(() => {
+    if (isSearching) {
+      return (
+        <Animated.View style={styles.searchEmpty} entering={FadeIn.duration(300).delay(100)}>
+          <Text style={styles.searchEmptyText}>No results for "{debouncedSearch}"</Text>
+        </Animated.View>
+      );
+    }
+    if (activeCategory && entries.length === 0) {
+      return (
+        <View style={styles.searchEmpty}>
+          <Text style={styles.searchEmptyText}>No entries in "{activeCategory}"</Text>
+        </View>
+      );
+    }
+    return null;
+  }, [isSearching, debouncedSearch, activeCategory, entries.length]);
 
   return (
     <View style={styles.container}>
@@ -447,6 +491,13 @@ export default function LibraryScreen() {
           <View style={styles.searchWrapper}>
             <SearchBar value={search} onChangeText={setSearch} />
           </View>
+          {!isSearching && categories.length > 0 && (
+            <CategoryBar
+              categories={categories}
+              active={activeCategory}
+              onSelect={setActiveCategory}
+            />
+          )}
           {isSearching && entries.length > 0 && (
             <Animated.View entering={FadeInDown.duration(250)} exiting={FadeOutUp.duration(200)}>
               <Text style={styles.searchResultLabel}>
@@ -512,6 +563,13 @@ const styles = StyleSheet.create({
   statText: { color: colors.textTertiary, fontSize: 12 },
   statNum: { color: colors.textSecondary, fontWeight: '600' },
   statSep: { color: colors.textPlaceholder },
+
+  // Category bar
+  categoryBar: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: 10,
+    gap: 8,
+  },
 
   // Search
   searchWrapper: {

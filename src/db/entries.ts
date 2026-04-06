@@ -108,12 +108,25 @@ export async function getPendingEntries(): Promise<Entry[]> {
   );
 }
 
+export interface CategoryCount {
+  name: string;
+  count: number;
+}
+
 export async function getCategories(): Promise<string[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<{ category: string }>(
     `SELECT category FROM entries WHERE category IS NOT NULL GROUP BY category ORDER BY COUNT(*) DESC`
   );
   return rows.map((r) => r.category);
+}
+
+export async function getCategoriesWithCounts(): Promise<CategoryCount[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ category: string; count: number }>(
+    `SELECT category, COUNT(*) as count FROM entries WHERE category IS NOT NULL GROUP BY category ORDER BY count DESC`
+  );
+  return rows.map((r) => ({ name: r.category, count: r.count }));
 }
 
 export async function getTags(): Promise<string[]> {

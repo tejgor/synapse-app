@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getEntries } from '../db/entries';
+import { getEntries, getCategoriesWithCounts } from '../db/entries';
+import type { CategoryCount } from '../db/entries';
 import { onProcessingUpdate } from '../services/processing';
 import type { Entry } from '../types';
 
 interface UseEntriesReturn {
   entries: Entry[];
+  categories: CategoryCount[];
   isFiltered: boolean;
   loading: boolean;
   refresh: () => Promise<void>;
@@ -12,6 +14,7 @@ interface UseEntriesReturn {
 
 export function useEntries(search?: string, category?: string): UseEntriesReturn {
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [categories, setCategories] = useState<CategoryCount[]>([]);
   const [isFiltered, setIsFiltered] = useState(false);
   const [loading, setLoading] = useState(true);
   const hasFetched = useRef(false);
@@ -19,9 +22,10 @@ export function useEntries(search?: string, category?: string): UseEntriesReturn
   const fetchEntries = useCallback(async (showLoading: boolean) => {
     if (showLoading) setLoading(true);
     try {
-      const result = await getEntries(search, category);
-      // Batch both state updates — React commits them in one render,
-      // so isFiltered and entries are always in sync.
+      const [result, cats] = await Promise.all([
+        getEntries(search, category),
+        getCategoriesWithCounts(),
+      ]);
       setIsFiltered(!!(search || category));
       setEntries(prev => {
         if (
@@ -31,6 +35,15 @@ export function useEntries(search?: string, category?: string): UseEntriesReturn
           return prev;
         }
         return result;
+      });
+      setCategories(prev => {
+        if (
+          prev.length === cats.length &&
+          prev.every((c, i) => c.name === cats[i].name && c.count === cats[i].count)
+        ) {
+          return prev;
+        }
+        return cats;
       });
     } catch (err) {
       console.error('Failed to fetch entries:', err);
@@ -54,5 +67,5 @@ export function useEntries(search?: string, category?: string): UseEntriesReturn
     return onProcessingUpdate(() => fetchEntries(false));
   }, [fetchEntries]);
 
-  return { entries, isFiltered, loading, refresh };
+  return { entries, categories, isFiltered, loading, refresh };
 }
