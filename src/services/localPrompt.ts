@@ -17,66 +17,40 @@ export function buildLocalKnowledgePrompt(
 ): string {
   const truncated = truncateTranscript(transcript);
 
-  const metaBlock = metadata && (metadata.originalTitle || metadata.description || metadata.authorName)
-    ? `\nVideo metadata:${metadata.originalTitle ? `\n- Title: ${metadata.originalTitle}` : ''}${metadata.authorName ? `\n- Creator: ${metadata.authorName}` : ''}${metadata.description ? `\n- Description: ${metadata.description.slice(0, 500)}` : ''}\n`
+  const metaLines: string[] = [];
+  if (metadata?.originalTitle) metaLines.push(`Title: ${metadata.originalTitle}`);
+  if (metadata?.authorName) metaLines.push(`Creator: ${metadata.authorName}`);
+  if (metadata?.description) metaLines.push(`Description: ${metadata.description.slice(0, 300)}`);
+  const metaBlock = metaLines.length > 0 ? `\nVideo info: ${metaLines.join(' | ')}\n` : '';
+
+  const categoryHint = existingCategories && existingCategories.length > 0
+    ? `\nPrefer these categories: ${existingCategories.join(', ')}`
     : '';
 
-  const categoryBlock = existingCategories && existingCategories.length > 0
-    ? `\nExisting categories: ${existingCategories.join(', ')}\nUse one of these if it fits. Only create a new category if none match.\n`
+  const tagHint = existingTags && existingTags.length > 0
+    ? `\nPrefer these tags: ${existingTags.join(', ')}`
     : '';
 
-  const tagBlock = existingTags && existingTags.length > 0
-    ? `\nExisting tags: ${existingTags.join(', ')}\nReuse these when they fit.\n`
-    : '';
-
-  const userMessage = `Extract structured knowledge from this video transcript. Return ONLY valid JSON.
+  const userMessage = `You are a knowledge extraction assistant. Extract structured knowledge from this video transcript and return valid JSON.
 ${metaBlock}
-Transcript:
+TRANSCRIPT:
 ${truncated}
 
-Source: ${sourceUrl}
-${categoryBlock}${tagBlock}
-Extract these fields:
-- title: Concise, descriptive (5-10 words)
-- summary: Core takeaway in 2-3 sentences
-- category: One topic category (1-2 words, e.g. "Productivity", "Cooking")
-- tags: 3-6 lowercase tags
-- contentType: Type of content (Tutorial, Review, Quick Tip, Recipe, Explainer, Opinion, etc.)
-- sections: Array of sections. Each section has:
-  - heading: Short label (e.g. "Steps", "Key Points", "At a Glance")
-  - style: "ordered" (numbered steps), "unordered" (bullet list), "key-value" (label+value pairs, include "label"), or "single" (one text block)
-  - items: Array of {text, label?} objects
+Source: ${sourceUrl}${categoryHint}${tagHint}
 
-Respond with ONLY this JSON format, no other text:
-{"title":"...","summary":"...","category":"...","tags":["..."],"contentType":"...","sections":[{"heading":"...","style":"ordered","items":[{"text":"..."}]}]}`;
+Return a JSON object with these fields:
+- "title": concise title, 5-10 words
+- "summary": core takeaway, 2-3 sentences
+- "category": one topic word like "Productivity" or "Cooking"
+- "tags": array of 3-6 lowercase tags
+- "contentType": content type like "Tutorial", "Review", "Quick Tip", "Recipe", "Explainer"
+- "sections": array of sections, each with "heading" (string), "style" ("ordered", "unordered", "key-value", or "single"), and "items" (array of objects with "text" and optional "label")
+
+Example output:
+{"title":"How to Build a Morning Routine","summary":"The video covers building a productive morning routine with three key habits. Focus on consistency over perfection.","category":"Productivity","tags":["morning routine","habits","productivity"],"contentType":"Tutorial","sections":[{"heading":"Steps","style":"ordered","items":[{"text":"Wake up at the same time daily"},{"text":"Exercise for 20 minutes"},{"text":"Review your goals"}]},{"heading":"At a Glance","style":"key-value","items":[{"label":"Duration","text":"30 minutes"},{"label":"Difficulty","text":"Beginner"}]}]}
+
+Now extract knowledge from the transcript above. Return ONLY valid JSON, no other text:`;
 
   // Wrap in Gemma chat template
   return `<start_of_turn>user\n${userMessage}<end_of_turn>\n<start_of_turn>model\n`;
 }
-
-// Standard JSON GBNF grammar — ensures valid JSON output
-export const JSON_GRAMMAR = `root   ::= object
-value  ::= object | array | string | number | ("true" | "false" | "null") ws
-
-object ::=
-  "{" ws (
-    string ":" ws value
-    ("," ws string ":" ws value)*
-  )? "}" ws
-
-array  ::=
-  "[" ws (
-    value
-    ("," ws value)*
-  )? "]" ws
-
-string ::=
-  "\\"" (
-    [^\\\\"\x7F\\x00-\\x1F] |
-    "\\\\" (["\\\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
-  )* "\\"" ws
-
-number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? (("e" | "E") ("+" | "-")? [0-9]+)? ws
-
-ws ::= ([ \\t\\n] ws)?
-`;

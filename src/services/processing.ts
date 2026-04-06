@@ -3,9 +3,19 @@ import { getEntryById, updateEntry, getPendingEntries, getCategories, getTags } 
 import { processEntry as callProcessAPI, ApiError } from './api';
 import { getProcessingMode } from './settings';
 import { isModelReady } from './modelManager';
+import { markBusy, markIdle } from './llmContext';
 import { fetchTranscript, fetchMetadata } from './transcript';
 import { extractKnowledgeLocally } from './localExtraction';
 import type { ProcessResponse } from '../types';
+
+// Background task module — iOS only
+let BackgroundTask: { beginBackgroundTask(): void; endBackgroundTask(): void } | null = null;
+if (Platform.OS === 'ios') {
+  BackgroundTask = require('../../modules/background-task').default;
+}
+
+// Track entries currently being processed locally (so retryFailedEntries skips them)
+const localInFlight = new Set<string>();
 
 // Background request module — iOS only
 let BackgroundRequest: {
@@ -102,12 +112,21 @@ export async function handleBackgroundResult(event: {
 async function processEntryLocally(entryId: string): Promise<void> {
   console.log(`[processing] local start entryId=${entryId}`);
 
+  // Track this entry so retryFailedEntries won't start a duplicate
+  localInFlight.add(entryId);
+
+  // Request background execution time + prevent context release during inference
+  BackgroundTask?.beginBackgroundTask();
+  markBusy();
+
   await updateEntry(entryId, { processing_status: 'processing' });
   notifyUpdate();
 
   const entry = await getEntryById(entryId);
   if (!entry) {
     console.warn(`[processing] entry ${entryId} not found — skipping`);
+    markIdle();
+    BackgroundTask?.endBackgroundTask();
     return;
   }
 
@@ -154,6 +173,10 @@ async function processEntryLocally(entryId: string): Promise<void> {
   } catch (err) {
     console.error(`[processing] local failed entryId=${entryId}:`, err);
     await updateEntry(entryId, { processing_status: 'failed' });
+  } finally {
+    localInFlight.delete(entryId);
+    markIdle();
+    BackgroundTask?.endBackgroundTask();
   }
 
   notifyUpdate();
@@ -252,8 +275,8 @@ export async function retryFailedEntries(): Promise<void> {
 
   const pending = await getPendingEntries();
   for (const entry of pending) {
-    if (inFlightIds.has(entry.id)) {
-      console.log(`[processing] skip retry entryId=${entry.id} — background request in flight`);
+    if (inFlightIds.has(entry.id) || localInFlight.has(entry.id)) {
+      console.log(`[processing] skip retry entryId=${entry.id} — already in flight`);
       continue;
     }
 

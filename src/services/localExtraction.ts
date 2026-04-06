@@ -1,25 +1,22 @@
 import type { ProcessResponse, ContentSection, KeyDetail } from '../types';
 import { getContext, releaseContext } from './llmContext';
-import { buildLocalKnowledgePrompt, JSON_GRAMMAR } from './localPrompt';
+import { buildLocalKnowledgePrompt } from './localPrompt';
 
 function extractJSON(raw: string): Record<string, unknown> | null {
-  // Strip markdown code fences
-  const text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  // Strip markdown code fences and whitespace
+  const text = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim();
+
+  if (!text) return null;
 
   // Try direct parse
   try {
     return JSON.parse(text) as Record<string, unknown>;
   } catch {}
 
-  // Try to extract first {...} block containing recognizable fields
-  const jsonMatch = text.match(/\{[\s\S]*?"(?:sections|contentType|title)"[\s\S]*?\}/);
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-    } catch {}
-  }
-
-  // Try first { to last } substring
+  // Try first { to last } substring (handles preamble/postamble text)
   const firstBrace = text.indexOf('{');
   const lastBrace = text.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace > firstBrace) {
@@ -56,16 +53,29 @@ export async function extractKnowledgeLocally(
     n_predict: 2048,
     temperature: 0.3,
     top_p: 0.9,
-    grammar: JSON_GRAMMAR,
-    stop: ['<end_of_turn>', '```'],
+    stop: ['<end_of_turn>'],
   });
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`[localExtraction] inference complete in ${elapsed}s — ${result.text.length} chars`);
 
+  if (!result.text.trim()) {
+    console.warn('[localExtraction] model returned empty output — retrying with higher temperature');
+    const retry = await ctx.completion({
+      prompt,
+      n_predict: 2048,
+      temperature: 0.7,
+      top_p: 0.95,
+      stop: ['<end_of_turn>'],
+    });
+    console.log(`[localExtraction] retry complete — ${retry.text.length} chars`);
+    result.text = retry.text;
+  }
+
+  console.log(`[localExtraction] raw output: ${result.text.slice(0, 300)}`);
+
   const parsed = extractJSON(result.text);
   if (!parsed || !parsed.title) {
-    // Release context on failure to free memory
     await releaseContext();
     throw new Error(`Local extraction returned invalid JSON: ${result.text.slice(0, 200)}`);
   }
