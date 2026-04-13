@@ -1,7 +1,5 @@
 import type { ProcessResponse, SourcePlatform } from '../types';
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || '';
-const API_SECRET = process.env.EXPO_PUBLIC_API_SECRET || '';
+import { getBackendConfig } from './backendConfig';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -20,16 +18,21 @@ export async function processEntry(
   existingCategories?: string[],
   existingTags?: string[],
 ): Promise<ProcessResponse> {
+  const { baseUrl, apiSecret, target } = await getBackendConfig();
+  if (!baseUrl) {
+    throw new ApiError(`No ${target === 'dev' ? 'development' : 'production'} API URL configured`);
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}/api/process`, {
+    response = await fetch(`${baseUrl}/api/process`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(API_SECRET ? { 'X-API-Key': API_SECRET } : {}),
+        ...(apiSecret ? { 'X-API-Key': apiSecret } : {}),
       },
       body: JSON.stringify({ videoUrl, platform, existingCategories, existingTags }),
       signal: controller.signal,

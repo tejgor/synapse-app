@@ -15,8 +15,11 @@ The app runs in **mock mode** by default — no backend or API keys required. Mo
 To connect to a real backend, create a `.env` file in the project root:
 
 ```
-EXPO_PUBLIC_API_URL=https://your-vercel-deployment.vercel.app
+EXPO_PUBLIC_API_URL=https://your-production-backend
+EXPO_PUBLIC_DEV_API_URL=http://192.168.1.160:3002
 ```
+
+`EXPO_PUBLIC_API_URL` is the default production backend. `EXPO_PUBLIC_DEV_API_URL` enables the runtime backend switch in Settings.
 
 ### 3. Start the dev server
 
@@ -49,7 +52,9 @@ OPENAI_API_KEY=...        # Voice note transcription (Whisper)
 ANTHROPIC_API_KEY=...     # AI summarization (Claude Haiku)
 ```
 
-Then set `EXPO_PUBLIC_API_URL=http://localhost:3002` in the root `.env`.
+Then set `EXPO_PUBLIC_DEV_API_URL=http://192.168.1.160:3002` in the root `.env`.
+
+> On a physical iPhone, `localhost` points to the phone itself. Always use your Mac's local network IP.
 
 ---
 

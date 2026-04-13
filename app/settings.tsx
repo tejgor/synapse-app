@@ -12,19 +12,38 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { colors, spacing, borderRadius, typography } from '@/src/constants/theme';
-import { getProcessingMode, setProcessingMode, type ProcessingMode } from '@/src/services/settings';
+import {
+  getProcessingMode,
+  setProcessingMode,
+  getBackendTarget,
+  setBackendTarget,
+  type ProcessingMode,
+  type BackendTarget,
+} from '@/src/services/settings';
+import { getBackendUrlPreview, hasDevBackendConfigured } from '@/src/services/backendConfig';
+import { LOCAL_MODEL_INFO } from '@/src/services/modelManager';
 import { useModelStatus } from '@/src/hooks/useModelStatus';
 
 export default function SettingsScreen() {
   const [mode, setMode] = useState<ProcessingMode>('cloud');
+  const [backendTarget, setBackendTargetState] = useState<BackendTarget>('prod');
   const { state: modelState, startDownload, cancel, remove, refresh } = useModelStatus();
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const devBackendConfigured = hasDevBackendConfigured();
 
   useFocusEffect(
     useCallback(() => {
-      getProcessingMode().then(setMode);
+      Promise.all([getProcessingMode(), getBackendTarget()]).then(async ([storedMode, storedBackendTarget]) => {
+        setMode(storedMode);
+        if (!devBackendConfigured && storedBackendTarget === 'dev') {
+          setBackendTargetState('prod');
+          await setBackendTarget('prod');
+          return;
+        }
+        setBackendTargetState(storedBackendTarget);
+      });
       refresh();
-    }, [refresh]),
+    }, [devBackendConfigured, refresh]),
   );
 
   const toggleMode = async (value: boolean) => {
@@ -32,7 +51,7 @@ export default function SettingsScreen() {
     if (newMode === 'local' && modelState !== 'ready') {
       Alert.alert(
         'Model required',
-        'Download the Gemma 4 model (~3 GB) first to enable on-device processing.',
+        `Download ${LOCAL_MODEL_INFO.name} (${LOCAL_MODEL_INFO.approxSizeLabel}) first to enable on-device processing.`,
       );
       return;
     }
@@ -49,10 +68,24 @@ export default function SettingsScreen() {
     }
   };
 
+  const toggleBackendTarget = async (value: boolean) => {
+    if (value && !devBackendConfigured) {
+      Alert.alert(
+        'Development backend not configured',
+        'Add EXPO_PUBLIC_DEV_API_URL to your root .env to enable runtime switching.',
+      );
+      return;
+    }
+
+    const nextTarget: BackendTarget = value ? 'dev' : 'prod';
+    setBackendTargetState(nextTarget);
+    await setBackendTarget(nextTarget);
+  };
+
   const handleDelete = () => {
     Alert.alert(
       'Delete model',
-      'This will remove the 3 GB model file and switch back to cloud processing.',
+      `This will remove the ${LOCAL_MODEL_INFO.approxSizeLabel} model file and switch back to cloud processing.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -80,7 +113,7 @@ export default function SettingsScreen() {
             <View style={styles.rowTextBlock}>
               <Text style={styles.rowTitle}>On-device processing</Text>
               <Text style={styles.rowSubtitle}>
-                Use Gemma 4 to extract knowledge locally instead of cloud AI
+                {`Use ${LOCAL_MODEL_INFO.name} to extract knowledge locally instead of cloud AI`}
               </Text>
             </View>
             <Switch
@@ -98,14 +131,46 @@ export default function SettingsScreen() {
         )}
       </View>
 
+      {/* Backend */}
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>BACKEND</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={styles.rowTextBlock}>
+              <Text style={styles.rowTitle}>Use development backend</Text>
+              <Text style={styles.rowSubtitle}>
+                Switch future requests between production and your local/dev API without rebuilding
+              </Text>
+            </View>
+            <Switch
+              value={backendTarget === 'dev'}
+              onValueChange={toggleBackendTarget}
+              disabled={!devBackendConfigured}
+              trackColor={{ false: colors.border, true: colors.accent }}
+              thumbColor={colors.text}
+            />
+          </View>
+
+          <View style={styles.backendMetaBlock}>
+            <Text style={styles.backendBadge}>{backendTarget === 'dev' ? 'Development' : 'Production'}</Text>
+            <Text style={styles.backendUrl}>{getBackendUrlPreview(backendTarget)}</Text>
+            {!devBackendConfigured && (
+              <Text style={styles.warningText}>
+                Add EXPO_PUBLIC_DEV_API_URL to .env to enable this switch.
+              </Text>
+            )}
+          </View>
+        </View>
+      </View>
+
       {/* Model Management */}
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>MODEL</Text>
         <View style={styles.card}>
           <View style={styles.modelHeader}>
             <View>
-              <Text style={styles.rowTitle}>Gemma 4 E2B</Text>
-              <Text style={styles.modelMeta}>2.3B params  |  Q4_K_M  |  ~3 GB</Text>
+              <Text style={styles.rowTitle}>{LOCAL_MODEL_INFO.name}</Text>
+              <Text style={styles.modelMeta}>{LOCAL_MODEL_INFO.parameterLabel}  |  {LOCAL_MODEL_INFO.quant}  |  {LOCAL_MODEL_INFO.approxSizeLabel}</Text>
             </View>
             {modelState === 'ready' && (
               <View style={styles.readyBadge}>
@@ -128,7 +193,7 @@ export default function SettingsScreen() {
           {modelState === 'downloading' && (
             <View style={styles.downloadingSection}>
               <ActivityIndicator size="small" color={colors.accent} />
-              <Text style={styles.downloadingText}>Downloading ~3 GB...</Text>
+              <Text style={styles.downloadingText}>Downloading {LOCAL_MODEL_INFO.approxSizeLabel}...</Text>
             </View>
           )}
 
@@ -149,8 +214,8 @@ export default function SettingsScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>ABOUT ON-DEVICE AI</Text>
         <View style={styles.card}>
-          <InfoRow icon="hardware-chip-outline" text="Requires iPhone 14+ (6 GB RAM)" />
-          <InfoRow icon="flash-outline" text="~30 tokens/sec on iPhone 16 Pro" />
+          <InfoRow icon="hardware-chip-outline" text={LOCAL_MODEL_INFO.recommendedDeviceLabel} />
+          <InfoRow icon="flash-outline" text={LOCAL_MODEL_INFO.speedLabel} />
           <InfoRow icon="lock-closed-outline" text="Fully private — data stays on device" />
           <InfoRow icon="alert-circle-outline" text="Quality may differ from cloud processing" />
         </View>
@@ -205,6 +270,28 @@ const styles = StyleSheet.create({
     marginLeft: spacing.xs,
   },
 
+  backendMetaBlock: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+    gap: spacing.xs,
+  },
+  backendBadge: {
+    alignSelf: 'flex-start',
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '600',
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  backendUrl: {
+    ...typography.mono,
+    color: colors.textSecondary,
+  },
+
   modelHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -257,6 +344,7 @@ const styles = StyleSheet.create({
   deleteBtnText: { color: colors.error, fontSize: 14, fontWeight: '500' },
 
   errorText: { color: colors.error, fontSize: 13, marginTop: spacing.sm },
+  warningText: { color: colors.warning, fontSize: 12, marginTop: spacing.xs },
 
   infoRow: {
     flexDirection: 'row',

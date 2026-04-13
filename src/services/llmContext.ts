@@ -49,13 +49,13 @@ export async function getContext(): Promise<LlamaContext> {
     throw new Error('Model not downloaded');
   }
 
-  console.log('[llmContext] loading model...');
+  console.log('[llmContext] loading local model...');
   const t0 = Date.now();
 
   loadingPromise = initLlama({
     model: getModelPath(),
-    n_ctx: 4096,
-    n_batch: 512,
+    n_ctx: 8192,
+    n_batch: 384,
     n_threads: 4,
     n_gpu_layers: 99, // Offload everything to Metal GPU
   });
@@ -66,7 +66,7 @@ export async function getContext(): Promise<LlamaContext> {
     loadingPromise = null;
   }
 
-  console.log(`[llmContext] model loaded in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  console.log(`[llmContext] local model loaded in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
   // Subscribe to app state changes — unload when backgrounded
   if (!appStateSubscription) {

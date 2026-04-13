@@ -24,7 +24,16 @@ npx expo start
 
 ## Configuration
 
-Set `EXPO_PUBLIC_API_URL` in your `.env` to point to your deployed backend. Without it, the app runs in mock mode with placeholder data.
+Set `EXPO_PUBLIC_API_URL` in your `.env` to point to your deployed backend.
+
+Optional for runtime switching in Settings:
+
+```env
+EXPO_PUBLIC_API_URL=https://your-production-backend
+EXPO_PUBLIC_DEV_API_URL=http://192.168.1.160:3002
+```
+
+On a real iPhone, use your Mac's LAN IP for `EXPO_PUBLIC_DEV_API_URL` — not `localhost`.
 
 ### Backend Environment Variables
 
