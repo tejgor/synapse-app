@@ -27,6 +27,7 @@ import { notifyUpdate, onProcessingUpdate, processEntry } from '@/src/services/p
 import type { Entry, KeyDetail, ContentSection, ContentItem } from '@/src/types';
 import { usePressAnimation } from '@/src/utils/animations';
 import { useCrystallize } from '@/src/utils/useCrystallize';
+import { getProcessingLabel } from '@/src/utils/processingLabel';
 import { SynapsePulse } from '@/src/components/SynapsePulse';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -410,6 +411,7 @@ export default function DetailScreen() {
   const catColor = entry.category ? categoryColor(entry.category) : colors.accent;
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
+  const processingLabel = getProcessingLabel(entry);
 
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
     month: 'long', day: 'numeric', year: 'numeric',
@@ -516,7 +518,7 @@ export default function DetailScreen() {
         {isProcessing && (
           <View style={styles.banner}>
             <ActivityIndicator size="small" color={colors.warning} />
-            <Text style={styles.bannerText}>Extracting knowledge...</Text>
+            <Text style={styles.bannerText}>{processingLabel}</Text>
           </View>
         )}
         {entry.processing_status === 'failed' && (

@@ -1,4 +1,5 @@
 export type ProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type ProcessingPhase = 'transcript' | 'llm';
 export type SourcePlatform = 'tiktok' | 'instagram' | 'youtube';
 
 export interface KeyDetail {
@@ -29,6 +30,7 @@ export interface Entry {
   video_transcript: string | null;
   content_type: string | null;
   processing_status: ProcessingStatus;
+  processing_phase: ProcessingPhase | null;
   created_at: string;
   processed_at: string | null;
   author_name: string | null;

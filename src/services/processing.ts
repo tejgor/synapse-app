@@ -74,7 +74,7 @@ async function drainInferenceQueue() {
       await runLocalInference(id);
     } catch (err) {
       console.error(`[processing] inference failed entryId=${id}:`, err);
-      await updateEntry(id, { processing_status: 'failed' });
+      await updateEntry(id, { processing_status: 'failed', processing_phase: null });
       notifyUpdate();
     } finally {
       localInFlight.delete(id);
@@ -95,7 +95,7 @@ async function runLocalInference(entryId: string): Promise<void> {
     return;
   }
 
-  await updateEntry(entryId, { processing_status: 'processing' });
+  await updateEntry(entryId, { processing_status: 'processing', processing_phase: 'llm' });
   notifyUpdate();
 
   const [existingCategories, existingTags] = await Promise.all([getCategories(), getTags()]);
@@ -123,6 +123,7 @@ async function runLocalInference(entryId: string): Promise<void> {
     key_details: JSON.stringify(result.sections || result.keyDetails),
     content_type: result.contentType || null,
     processing_status: 'completed',
+    processing_phase: null,
     processed_at: new Date().toISOString(),
     ...(result.metadata ? {
       author_name: result.metadata.authorName,
@@ -161,6 +162,7 @@ export async function handleBackgroundResult(event: {
     }
     await updateEntry(entryId, {
       processing_status: 'failed',
+      processing_phase: null,
       ...(meta ? {
         title: meta.originalTitle ?? null,
         author_name: meta.authorName,
@@ -184,6 +186,7 @@ export async function handleBackgroundResult(event: {
       const meta = parsed.metadata as ProcessResponse['metadata'] | null;
       await updateEntry(entryId, {
         video_transcript: parsed.videoTranscript as string,
+        processing_phase: 'llm',
         ...(meta ? {
           author_name: meta.authorName,
           author_username: meta.authorUsername,
@@ -201,7 +204,7 @@ export async function handleBackgroundResult(event: {
         enqueueLocalInference(entryId);
       } else {
         // Will be picked up by retryFailedEntries on foreground
-        await updateEntry(entryId, { processing_status: 'pending' });
+        await updateEntry(entryId, { processing_status: 'pending', processing_phase: 'llm' });
       }
       return;
     }
@@ -217,6 +220,7 @@ export async function handleBackgroundResult(event: {
       key_details: JSON.stringify(result.sections || result.keyDetails),
       content_type: result.contentType || null,
       processing_status: 'completed',
+      processing_phase: null,
       processed_at: new Date().toISOString(),
       ...(result.metadata ? {
         author_name: result.metadata.authorName,
@@ -231,7 +235,7 @@ export async function handleBackgroundResult(event: {
     console.log(`[processing] completed entryId=${entryId} title="${result.title}" contentType="${result.contentType}"`);
   } catch (err) {
     console.error(`[processing] failed to parse result entryId=${entryId}:`, err);
-    await updateEntry(entryId, { processing_status: 'failed' });
+    await updateEntry(entryId, { processing_status: 'failed', processing_phase: null });
   }
 
   notifyUpdate();
@@ -254,7 +258,7 @@ async function processEntryLocally(entryId: string): Promise<void> {
   }
 
   // Hand off transcript fetch to BackgroundURLSession (same pattern as cloud flow)
-  await updateEntry(entryId, { processing_status: 'processing' });
+  await updateEntry(entryId, { processing_status: 'processing', processing_phase: 'transcript' });
   notifyUpdate();
 
   if (Platform.OS === 'ios' && BackgroundRequest) {
@@ -286,7 +290,7 @@ async function processEntryCloud(entryId: string, entry?: Awaited<ReturnType<typ
     }
   }
 
-  await updateEntry(entryId, { processing_status: 'processing' });
+  await updateEntry(entryId, { processing_status: 'processing', processing_phase: null });
 
   const [existingCategories, existingTags] = await Promise.all([getCategories(), getTags()]);
 
@@ -314,6 +318,7 @@ async function processEntryCloud(entryId: string, entry?: Awaited<ReturnType<typ
         key_details: JSON.stringify(result.sections || result.keyDetails),
         content_type: result.contentType || null,
         processing_status: 'completed',
+        processing_phase: null,
         processed_at: new Date().toISOString(),
         ...(result.metadata ? {
           author_name: result.metadata.authorName,
@@ -331,6 +336,7 @@ async function processEntryCloud(entryId: string, entry?: Awaited<ReturnType<typ
       const meta = err instanceof ApiError ? err.metadata : null;
       await updateEntry(entryId, {
         processing_status: 'failed',
+        processing_phase: null,
         ...(meta ? {
           title: meta.originalTitle ?? null,
           author_name: meta.authorName,
@@ -384,7 +390,7 @@ export async function retryFailedEntries(): Promise<void> {
 
     if (entry.processing_status === 'processing') {
       // No in-flight request — genuinely stale from a killed prior run
-      await updateEntry(entry.id, { processing_status: 'pending' });
+      await updateEntry(entry.id, { processing_status: 'pending', processing_phase: null });
     }
     processEntry(entry.id).catch(() => {});
   }

@@ -31,14 +31,15 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
           source_platform TEXT NOT NULL,
           video_transcript TEXT,
           processing_status TEXT DEFAULT 'pending',
+          processing_phase TEXT,
           created_at TEXT NOT NULL,
           processed_at TEXT
         );
       `);
 
       await db.execAsync(`
-        INSERT INTO entries (id, source_url, source_platform, video_transcript, processing_status, created_at, processed_at, category)
-        SELECT id, video_url, source_platform, video_transcript, processing_status, created_at, processed_at, topic_tag
+        INSERT INTO entries (id, source_url, source_platform, video_transcript, processing_status, processing_phase, created_at, processed_at, category)
+        SELECT id, video_url, source_platform, video_transcript, processing_status, NULL, created_at, processed_at, topic_tag
         FROM entries_old;
       `);
 
@@ -57,6 +58,7 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
           source_platform TEXT NOT NULL,
           video_transcript TEXT,
           processing_status TEXT DEFAULT 'pending',
+          processing_phase TEXT,
           created_at TEXT NOT NULL,
           processed_at TEXT,
           author_name TEXT,
@@ -73,6 +75,7 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
 
     // Migrate: add metadata columns for existing installs
     const metadataColumns: [string, string][] = [
+      ['processing_phase', 'TEXT'],
       ['author_name', 'TEXT'],
       ['author_username', 'TEXT'],
       ['thumbnail_url', 'TEXT'],

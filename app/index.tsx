@@ -40,6 +40,7 @@ import {
   usePressAnimation, useEmptyStateEntrance, useSlideUp,
 } from '@/src/utils/animations';
 import { useCrystallize } from '@/src/utils/useCrystallize';
+import { getProcessingLabel } from '@/src/utils/processingLabel';
 import type { Entry } from '@/src/types';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -94,6 +95,7 @@ function HeroCard({
   const catColor = entry.category ? categoryColor(entry.category) : colors.accent;
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
+  const processingLabel = getProcessingLabel(entry);
   const isLegacyEntry = !entry.content_type;
   const keyDetails = isLegacyEntry && entry.key_details ? JSON.parse(entry.key_details) : [];
   const sections = !isLegacyEntry && entry.key_details ? JSON.parse(entry.key_details) : [];
@@ -135,7 +137,7 @@ function HeroCard({
           <View style={[styles.heroAccentBar, { backgroundColor: catColor }]} />
           <View style={styles.heroTitleBlock}>
             {isProcessing ? (
-              <Text style={styles.heroProcessing}>Extracting knowledge...</Text>
+              <Text style={styles.heroProcessing}>{processingLabel}</Text>
             ) : (entry.title || entry.processing_status === 'failed') ? (
               <>
                 <Text style={styles.heroTitle} numberOfLines={3}>
@@ -653,7 +655,7 @@ const styles = StyleSheet.create({
     lineHeight: 35,
     letterSpacing: -0.5,
   },
-  heroProcessing: { color: colors.textTertiary, fontSize: 18, fontStyle: 'italic' },
+  heroProcessing: { color: colors.textTertiary, fontSize: 18, fontStyle: 'italic', flexShrink: 1 },
   heroFailedBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
   heroFailedLabel: { color: colors.textTertiary, fontSize: 12, fontWeight: '500' },
   heroSummary: {

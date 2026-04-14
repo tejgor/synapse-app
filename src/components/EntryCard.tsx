@@ -9,6 +9,7 @@ import {
 } from '../constants/theme';
 import { usePressAnimation, usePulse } from '../utils/animations';
 import { useCrystallizeStaggered } from '../utils/useCrystallize';
+import { getProcessingLabel } from '../utils/processingLabel';
 import type { Entry } from '../types';
 
 const AnimatedPressable = ReAnimated.createAnimatedComponent(Pressable);
@@ -67,6 +68,7 @@ export function EntryCard({
 
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
+  const processingLabel = getProcessingLabel(entry);
 
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric',
@@ -103,7 +105,7 @@ export function EntryCard({
           >
             <View style={[styles.compactDot, { backgroundColor: catColor }]} />
             <Text style={styles.compactTitle} numberOfLines={1}>
-              {entry.title || (isProcessing ? 'Extracting knowledge...' : entry.processing_status === 'failed' ? (PLATFORM_FALLBACK_TITLES[entry.source_platform] || 'Untitled Video') : 'Untitled')}
+              {entry.title || (isProcessing ? processingLabel : entry.processing_status === 'failed' ? (PLATFORM_FALLBACK_TITLES[entry.source_platform] || 'Untitled Video') : 'Untitled')}
             </Text>
             <View style={styles.compactRight}>
               {platformIcon && (
@@ -145,7 +147,7 @@ export function EntryCard({
             {isProcessing && (
               <View style={styles.processingRow}>
                 <ProcessingDot />
-                <Text style={styles.processingLabel}>Processing...</Text>
+                <Text style={styles.processingLabel}>{processingLabel}</Text>
               </View>
             )}
 
@@ -238,6 +240,7 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     fontSize: 11,
     fontStyle: 'italic',
+    flexShrink: 1,
   },
   title: {
     color: colors.text,
