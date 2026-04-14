@@ -1,11 +1,11 @@
 import { Platform, AppState } from 'react-native';
 import { getEntryById, updateEntry, getPendingEntries, getCategories, getTags } from '../db/entries';
 import { processEntry as callProcessAPI, ApiError } from './api';
-import { getProcessingMode } from './settings';
+import { getProcessingMode, getLocalInferencePaused, setLocalInferencePaused } from './settings';
 import { getBackendConfig } from './backendConfig';
 import { isModelReady } from './modelManager';
-import { markBusy, markIdle } from './llmContext';
-import { extractKnowledgeLocally } from './localExtraction';
+import { markBusy, markIdle, stopActiveCompletion } from './llmContext';
+import { extractKnowledgeLocally, LocalInferenceInterruptedError } from './localExtraction';
 import type { ProcessResponse } from '../types';
 
 // Background task module — iOS only
@@ -43,47 +43,232 @@ export function notifyUpdate() {
   listeners.forEach((fn) => fn());
 }
 
-// ─── Local inference queue (sequential — single llama.rn context) ────────────
+// ─── Local inference state / controls ────────────────────────────────────────
 
+export interface LocalInferenceState {
+  paused: boolean;
+  running: boolean;
+  stopping: boolean;
+  currentEntryId: string | null;
+  queuedEntryIds: string[];
+}
+
+type LocalInferenceStateListener = (state: LocalInferenceState) => void;
+
+const localInferenceListeners = new Set<LocalInferenceStateListener>();
 const inferenceQueue: string[] = [];
 let inferenceRunning = false;
+let localInferencePaused = false;
+let localInferenceLoaded = false;
+let localInferenceLoadPromise: Promise<void> | null = null;
+let currentInferenceEntryId: string | null = null;
+let stopRequestedEntryId: string | null = null;
+let interruptPriorityTargetId: string | null = null;
+let localInferenceStopping = false;
+
+function removeFromInferenceQueue(entryId: string) {
+  const index = inferenceQueue.indexOf(entryId);
+  if (index !== -1) {
+    inferenceQueue.splice(index, 1);
+  }
+}
+
+function insertIntoInferenceQueueAfter(afterEntryId: string, entryId: string) {
+  removeFromInferenceQueue(entryId);
+  const afterIndex = inferenceQueue.indexOf(afterEntryId);
+  if (afterIndex === -1) {
+    inferenceQueue.unshift(entryId);
+    return;
+  }
+  inferenceQueue.splice(afterIndex + 1, 0, entryId);
+}
+
+function getLocalInferenceStateSnapshot(): LocalInferenceState {
+  return {
+    paused: localInferencePaused,
+    running: inferenceRunning,
+    stopping: localInferenceStopping,
+    currentEntryId: currentInferenceEntryId,
+    queuedEntryIds: [...inferenceQueue],
+  };
+}
+
+function notifyLocalInferenceState() {
+  const snapshot = getLocalInferenceStateSnapshot();
+  localInferenceListeners.forEach((fn) => fn(snapshot));
+}
+
+async function ensureLocalInferenceStateLoaded(): Promise<void> {
+  if (localInferenceLoaded) return;
+  if (localInferenceLoadPromise) return localInferenceLoadPromise;
+
+  localInferenceLoadPromise = (async () => {
+    localInferencePaused = await getLocalInferencePaused();
+    localInferenceLoaded = true;
+    notifyLocalInferenceState();
+  })().finally(() => {
+    localInferenceLoadPromise = null;
+  });
+
+  return localInferenceLoadPromise;
+}
+
+export async function getLocalInferenceState(): Promise<LocalInferenceState> {
+  await ensureLocalInferenceStateLoaded();
+  return getLocalInferenceStateSnapshot();
+}
+
+export function onLocalInferenceStateChange(fn: LocalInferenceStateListener) {
+  localInferenceListeners.add(fn);
+  void getLocalInferenceState().then(fn).catch(() => {});
+  return () => { localInferenceListeners.delete(fn); };
+}
+
+export async function pauseLocalInference(): Promise<void> {
+  await ensureLocalInferenceStateLoaded();
+
+  localInferencePaused = true;
+  await setLocalInferencePaused(true);
+
+  if (currentInferenceEntryId) {
+    stopRequestedEntryId = currentInferenceEntryId;
+    localInferenceStopping = true;
+  }
+
+  notifyLocalInferenceState();
+
+  if (currentInferenceEntryId) {
+    await stopActiveCompletion();
+  }
+}
+
+export async function resumeLocalInference(): Promise<void> {
+  await ensureLocalInferenceStateLoaded();
+
+  localInferencePaused = false;
+  await setLocalInferencePaused(false);
+  notifyLocalInferenceState();
+
+  void drainInferenceQueue();
+}
+
+export async function prioritizeLocalInference(entryId: string, options?: { resumeIfPaused?: boolean }): Promise<void> {
+  await ensureLocalInferenceStateLoaded();
+
+  if (currentInferenceEntryId === entryId) {
+    if (localInferencePaused && options?.resumeIfPaused !== false) {
+      localInferencePaused = false;
+      await setLocalInferencePaused(false);
+      notifyLocalInferenceState();
+      void drainInferenceQueue();
+    }
+    return;
+  }
+
+  removeFromInferenceQueue(entryId);
+  inferenceQueue.unshift(entryId);
+
+  if (localInferencePaused && options?.resumeIfPaused !== false) {
+    localInferencePaused = false;
+    await setLocalInferencePaused(false);
+  }
+
+  if (currentInferenceEntryId && currentInferenceEntryId !== entryId) {
+    interruptPriorityTargetId = entryId;
+    stopRequestedEntryId = currentInferenceEntryId;
+    localInferenceStopping = true;
+    notifyLocalInferenceState();
+    await stopActiveCompletion();
+    return;
+  }
+
+  notifyLocalInferenceState();
+  void drainInferenceQueue();
+}
+
+// ─── Local inference queue (sequential — single llama.rn context) ────────────
 
 function enqueueLocalInference(entryId: string) {
-  if (!inferenceQueue.includes(entryId)) {
+  if (!inferenceQueue.includes(entryId) && currentInferenceEntryId !== entryId) {
     inferenceQueue.push(entryId);
   }
-  drainInferenceQueue();
+  notifyLocalInferenceState();
+  void drainInferenceQueue();
 }
 
 async function drainInferenceQueue() {
-  if (inferenceRunning) return;
+  await ensureLocalInferenceStateLoaded();
+
+  if (inferenceRunning || localInferencePaused) {
+    notifyLocalInferenceState();
+    return;
+  }
+
   inferenceRunning = true;
+  notifyLocalInferenceState();
 
   BackgroundTask?.beginBackgroundTask();
   markBusy();
 
-  while (inferenceQueue.length > 0) {
-    if (AppState.currentState !== 'active') {
-      console.log('[processing] app backgrounded — pausing inference queue');
-      break;
-    }
+  try {
+    while (inferenceQueue.length > 0) {
+      if (localInferencePaused) {
+        console.log('[processing] local inference paused — holding queue');
+        break;
+      }
 
-    const id = inferenceQueue.shift()!;
-    localInFlight.add(id);
-    try {
-      await runLocalInference(id);
-    } catch (err) {
-      console.error(`[processing] inference failed entryId=${id}:`, err);
-      await updateEntry(id, { processing_status: 'failed', processing_phase: null });
-      notifyUpdate();
-    } finally {
-      localInFlight.delete(id);
+      if (AppState.currentState !== 'active') {
+        console.log('[processing] app backgrounded — pausing inference queue');
+        break;
+      }
+
+      const id = inferenceQueue.shift()!;
+      currentInferenceEntryId = id;
+      if (interruptPriorityTargetId === id) {
+        interruptPriorityTargetId = null;
+      }
+      localInferenceStopping = stopRequestedEntryId === id;
+      notifyLocalInferenceState();
+
+      localInFlight.add(id);
+      try {
+        await runLocalInference(id);
+      } catch (err) {
+        const interrupted = err instanceof LocalInferenceInterruptedError || stopRequestedEntryId === id;
+
+        if (interrupted) {
+          console.log(`[processing] inference paused entryId=${id}`);
+          if (!inferenceQueue.includes(id)) {
+            if (interruptPriorityTargetId && interruptPriorityTargetId !== id) {
+              insertIntoInferenceQueueAfter(interruptPriorityTargetId, id);
+            } else {
+              inferenceQueue.unshift(id);
+            }
+          }
+          interruptPriorityTargetId = null;
+          await updateEntry(id, { processing_status: 'pending', processing_phase: 'llm' });
+          notifyUpdate();
+        } else {
+          console.error(`[processing] inference failed entryId=${id}:`, err);
+          await updateEntry(id, { processing_status: 'failed', processing_phase: null });
+          notifyUpdate();
+        }
+      } finally {
+        localInFlight.delete(id);
+        if (stopRequestedEntryId === id) {
+          stopRequestedEntryId = null;
+        }
+        currentInferenceEntryId = null;
+        localInferenceStopping = false;
+        notifyLocalInferenceState();
+      }
     }
+  } finally {
+    markIdle();
+    BackgroundTask?.endBackgroundTask();
+    inferenceRunning = false;
+    notifyLocalInferenceState();
   }
-
-  markIdle();
-  BackgroundTask?.endBackgroundTask();
-  inferenceRunning = false;
 }
 
 async function runLocalInference(entryId: string): Promise<void> {
@@ -113,6 +298,7 @@ async function runLocalInference(entryId: string): Promise<void> {
     metadata,
     existingCategories,
     existingTags,
+    () => stopRequestedEntryId === entryId || localInferencePaused,
   );
 
   await updateEntry(entryId, {
@@ -373,6 +559,8 @@ export async function processEntry(entryId: string): Promise<void> {
 // ─── Retry pending/failed entries on launch ───────────────────────────────────
 
 export async function retryFailedEntries(): Promise<void> {
+  await ensureLocalInferenceStateLoaded();
+
   // Check which entries already have in-flight background URLSession tasks
   const inFlightIds = new Set<string>();
   if (Platform.OS === 'ios' && BackgroundRequest) {

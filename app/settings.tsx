@@ -23,18 +23,35 @@ import {
 import { getBackendUrlPreview, hasDevBackendConfigured } from '@/src/services/backendConfig';
 import { LOCAL_MODEL_INFO } from '@/src/services/modelManager';
 import { useModelStatus } from '@/src/hooks/useModelStatus';
+import {
+  getLocalInferenceState,
+  onLocalInferenceStateChange,
+  pauseLocalInference,
+  resumeLocalInference,
+  type LocalInferenceState,
+} from '@/src/services/processing';
+
+const DEFAULT_LOCAL_INFERENCE_STATE: LocalInferenceState = {
+  paused: false,
+  running: false,
+  stopping: false,
+  currentEntryId: null,
+  queuedEntryIds: [],
+};
 
 export default function SettingsScreen() {
   const [mode, setMode] = useState<ProcessingMode>('cloud');
   const [backendTarget, setBackendTargetState] = useState<BackendTarget>('prod');
   const { state: modelState, startDownload, cancel, remove, refresh } = useModelStatus();
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [localInferenceState, setLocalInferenceState] = useState<LocalInferenceState>(DEFAULT_LOCAL_INFERENCE_STATE);
   const devBackendConfigured = hasDevBackendConfigured();
 
   useFocusEffect(
     useCallback(() => {
-      Promise.all([getProcessingMode(), getBackendTarget()]).then(async ([storedMode, storedBackendTarget]) => {
+      Promise.all([getProcessingMode(), getBackendTarget(), getLocalInferenceState()]).then(async ([storedMode, storedBackendTarget, inferenceState]) => {
         setMode(storedMode);
+        setLocalInferenceState(inferenceState);
         if (!devBackendConfigured && storedBackendTarget === 'dev') {
           setBackendTargetState('prod');
           await setBackendTarget('prod');
@@ -43,6 +60,8 @@ export default function SettingsScreen() {
         setBackendTargetState(storedBackendTarget);
       });
       refresh();
+
+      return onLocalInferenceStateChange(setLocalInferenceState);
     }, [devBackendConfigured, refresh]),
   );
 
@@ -81,6 +100,25 @@ export default function SettingsScreen() {
     setBackendTargetState(nextTarget);
     await setBackendTarget(nextTarget);
   };
+
+  const handlePauseLocalAI = async () => {
+    await pauseLocalInference();
+  };
+
+  const handleResumeLocalAI = async () => {
+    await resumeLocalInference();
+  };
+
+  const localQueueCount = localInferenceState.queuedEntryIds.length + (localInferenceState.currentEntryId ? 1 : 0);
+  const localStatusText = localInferenceState.stopping
+    ? 'Pausing current on-device extraction…'
+    : localInferenceState.paused
+      ? `Paused${localQueueCount > 0 ? ` • ${localQueueCount} item${localQueueCount === 1 ? '' : 's'} waiting` : ''}`
+      : localInferenceState.running
+        ? `Running${localQueueCount > 1 ? ` • ${localQueueCount - 1} queued next` : ''}`
+        : localQueueCount > 0
+          ? `Ready to resume • ${localQueueCount} queued`
+          : 'Idle';
 
   const handleDelete = () => {
     Alert.alert(
@@ -125,9 +163,63 @@ export default function SettingsScreen() {
           </View>
         </View>
         {mode === 'local' && (
-          <Text style={styles.hint}>
-            Transcript fetching still requires internet. Only AI extraction runs on-device.
-          </Text>
+          <>
+            <Text style={styles.hint}>
+              Transcript fetching still requires internet. Only AI extraction runs on-device.
+            </Text>
+
+            <View style={styles.localControlCard}>
+              <View style={styles.localControlHeader}>
+                <View style={styles.rowTextBlock}>
+                  <Text style={styles.rowTitle}>Local inference controls</Text>
+                  <Text style={styles.rowSubtitle}>
+                    Pause on-device extraction when you want to switch context, then resume later.
+                  </Text>
+                </View>
+                <Text style={styles.localStatusBadge}>{localStatusText}</Text>
+              </View>
+
+              {localInferenceState.currentEntryId && (
+                <Text style={styles.localQueueMeta} numberOfLines={1}>
+                  Current entry: {localInferenceState.currentEntryId}
+                </Text>
+              )}
+
+              {localInferenceState.queuedEntryIds.length > 0 && (
+                <Text style={styles.localQueueMeta}>
+                  Queued entries: {localInferenceState.queuedEntryIds.length}
+                </Text>
+              )}
+
+              <View style={styles.localControlActions}>
+                <Pressable
+                  style={[
+                    styles.localControlButton,
+                    styles.localPauseButton,
+                    (localInferenceState.paused || (!localInferenceState.running && localInferenceState.queuedEntryIds.length === 0)) && styles.localControlButtonDisabled,
+                  ]}
+                  onPress={handlePauseLocalAI}
+                  disabled={localInferenceState.paused || (!localInferenceState.running && localInferenceState.queuedEntryIds.length === 0)}
+                >
+                  <Ionicons name="pause-outline" size={16} color={colors.text} />
+                  <Text style={styles.localControlButtonText}>Pause</Text>
+                </Pressable>
+
+                <Pressable
+                  style={[
+                    styles.localControlButton,
+                    styles.localResumeButton,
+                    !localInferenceState.paused && styles.localControlButtonDisabled,
+                  ]}
+                  onPress={handleResumeLocalAI}
+                  disabled={!localInferenceState.paused}
+                >
+                  <Ionicons name="play-outline" size={16} color={colors.text} />
+                  <Text style={styles.localControlButtonText}>Resume</Text>
+                </Pressable>
+              </View>
+            </View>
+          </>
         )}
       </View>
 
@@ -268,6 +360,60 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: spacing.sm,
     marginLeft: spacing.xs,
+  },
+
+  localControlCard: {
+    marginTop: spacing.md,
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  localControlHeader: {
+    gap: spacing.sm,
+  },
+  localStatusBadge: {
+    alignSelf: 'flex-start',
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '600',
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.xs,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  localQueueMeta: {
+    ...typography.mono,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  localControlActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  localControlButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: borderRadius.sm,
+    paddingVertical: 10,
+  },
+  localPauseButton: {
+    backgroundColor: colors.borderSubtle,
+  },
+  localResumeButton: {
+    backgroundColor: colors.accent,
+  },
+  localControlButtonDisabled: {
+    opacity: 0.5,
+  },
+  localControlButtonText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
   },
 
   backendMetaBlock: {

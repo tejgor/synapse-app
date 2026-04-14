@@ -82,6 +82,17 @@ export async function getContext(): Promise<LlamaContext> {
   return context;
 }
 
+export async function stopActiveCompletion(): Promise<void> {
+  if (!context) return;
+
+  try {
+    await context.stopCompletion();
+    console.log('[llmContext] stopCompletion requested');
+  } catch (err) {
+    console.warn('[llmContext] error stopping completion:', err);
+  }
+}
+
 export async function releaseContext(): Promise<void> {
   loadingPromise = null;
 

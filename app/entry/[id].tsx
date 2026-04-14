@@ -23,7 +23,16 @@ import {
   colors, spacing, borderRadius, shadows, typography, animation, categoryColor, categoryTint,
 } from '@/src/constants/theme';
 import { getEntryById, updateEntry, deleteEntry, renameCategory } from '@/src/db/entries';
-import { notifyUpdate, onProcessingUpdate, processEntry } from '@/src/services/processing';
+import {
+  notifyUpdate,
+  onProcessingUpdate,
+  onLocalInferenceStateChange,
+  getLocalInferenceState,
+  prioritizeLocalInference,
+  processEntry,
+  type LocalInferenceState,
+} from '@/src/services/processing';
+import { getProcessingMode } from '@/src/services/settings';
 import type { Entry, KeyDetail, ContentSection, ContentItem } from '@/src/types';
 import { usePressAnimation } from '@/src/utils/animations';
 import { useCrystallize } from '@/src/utils/useCrystallize';
@@ -300,10 +309,20 @@ function SourcePill({ url, platform }: { url: string; platform: string }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
+const DEFAULT_LOCAL_INFERENCE_STATE: LocalInferenceState = {
+  paused: false,
+  running: false,
+  stopping: false,
+  currentEntryId: null,
+  queuedEntryIds: [],
+};
+
 export default function DetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [entry, setEntry] = useState<Entry | null>(null);
   const [loading, setLoading] = useState(true);
+  const [processingMode, setProcessingMode] = useState<'cloud' | 'local'>('cloud');
+  const [localInferenceState, setLocalInferenceState] = useState<LocalInferenceState>(DEFAULT_LOCAL_INFERENCE_STATE);
 
   const reload = useCallback(() => {
     if (!id) return;
@@ -316,6 +335,12 @@ export default function DetailScreen() {
   }, [id]);
 
   useEffect(() => onProcessingUpdate(reload), [reload]);
+
+  useEffect(() => {
+    getProcessingMode().then(setProcessingMode).catch(() => {});
+    getLocalInferenceState().then(setLocalInferenceState).catch(() => {});
+    return onLocalInferenceStateChange(setLocalInferenceState);
+  }, []);
 
   const handleEditCategory = useCallback(() => {
     if (!entry?.category || !id) return;
@@ -363,6 +388,11 @@ export default function DetailScreen() {
     reload();
     processEntry(id);
   }, [id, reload]);
+
+  const handleProcessNext = useCallback(async () => {
+    if (!id) return;
+    await prioritizeLocalInference(id);
+  }, [id]);
 
   const handleRemove = useCallback(() => {
     if (!id) return;
@@ -412,6 +442,20 @@ export default function DetailScreen() {
   const isProcessing =
     entry.processing_status === 'processing' || entry.processing_status === 'pending';
   const processingLabel = getProcessingLabel(entry);
+  const isLocalMode = processingMode === 'local';
+  const isCurrentLocalEntry = localInferenceState.currentEntryId === entry.id;
+  const isQueuedLocalEntry = localInferenceState.queuedEntryIds.includes(entry.id);
+  const canPrioritizeLocalEntry = isLocalMode
+    && !!entry.video_transcript
+    && isProcessing
+    && !isCurrentLocalEntry;
+  const processNextLabel = localInferenceState.paused
+    ? 'Resume and process this next'
+    : localInferenceState.currentEntryId && localInferenceState.currentEntryId !== entry.id
+      ? 'Pause current and process this next'
+      : isQueuedLocalEntry
+        ? 'Move to front'
+        : 'Process this next';
 
   const date = new Date(entry.created_at).toLocaleDateString('en-US', {
     month: 'long', day: 'numeric', year: 'numeric',
@@ -516,9 +560,25 @@ export default function DetailScreen() {
 
         {/* ── Processing / failed ── */}
         {isProcessing && (
-          <View style={styles.banner}>
-            <ActivityIndicator size="small" color={colors.warning} />
-            <Text style={styles.bannerText}>{processingLabel}</Text>
+          <View style={styles.processingSection}>
+            <View style={styles.banner}>
+              <ActivityIndicator size="small" color={colors.warning} />
+              <Text style={styles.bannerText}>{processingLabel}</Text>
+            </View>
+
+            {isCurrentLocalEntry && isLocalMode && (
+              <View style={styles.localQueueHint}>
+                <Ionicons name="hardware-chip-outline" size={14} color={colors.textTertiary} />
+                <Text style={styles.localQueueHintText}>Currently running on-device</Text>
+              </View>
+            )}
+
+            {canPrioritizeLocalEntry && (
+              <Pressable style={styles.processNextButton} onPress={handleProcessNext}>
+                <Ionicons name="play-forward-outline" size={16} color={colors.accent} />
+                <Text style={styles.processNextButtonText}>{processNextLabel}</Text>
+              </Pressable>
+            )}
           </View>
         )}
         {entry.processing_status === 'failed' && (
@@ -656,12 +716,40 @@ const styles = StyleSheet.create({
   tagText: { color: colors.textTertiary, fontSize: 11, fontWeight: '500' },
 
   // Banners
+  processingSection: { gap: 10 },
   banner: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: colors.surface, borderRadius: borderRadius.md,
     padding: spacing.md, ...shadows.sm,
   },
   bannerText: { color: colors.textSecondary, ...typography.caption },
+  localQueueHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  localQueueHintText: {
+    color: colors.textTertiary,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  processNextButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.accentSubtle,
+    borderRadius: borderRadius.md,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: colors.accent,
+  },
+  processNextButtonText: {
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '600',
+  },
 
   // Failed entry actions
   failedSourceLink: {

@@ -8,6 +8,7 @@ const KEYS = {
   processingMode: 'synapse:processingMode',
   modelDownloadState: 'synapse:modelDownloadState',
   backendTarget: 'synapse:backendTarget',
+  localInferencePaused: 'synapse:localInferencePaused',
 } as const;
 
 export async function getProcessingMode(): Promise<ProcessingMode> {
@@ -35,4 +36,13 @@ export async function getBackendTarget(): Promise<BackendTarget> {
 
 export async function setBackendTarget(target: BackendTarget): Promise<void> {
   await AsyncStorage.setItem(KEYS.backendTarget, target);
+}
+
+export async function getLocalInferencePaused(): Promise<boolean> {
+  const value = await AsyncStorage.getItem(KEYS.localInferencePaused);
+  return value === 'true';
+}
+
+export async function setLocalInferencePaused(paused: boolean): Promise<void> {
+  await AsyncStorage.setItem(KEYS.localInferencePaused, paused ? 'true' : 'false');
 }

@@ -40,6 +40,13 @@ const RESPONSE_SCHEMA = {
 
 type CompletionMode = 'prompt-text' | 'prompt-schema';
 
+export class LocalInferenceInterruptedError extends Error {
+  constructor() {
+    super('Local inference interrupted');
+    this.name = 'LocalInferenceInterruptedError';
+  }
+}
+
 function repairJSON(text: string): string {
   let result = text.trim();
   result = result.replace(/,(\s*[}\]])/g, '$1');
@@ -247,6 +254,7 @@ export async function extractKnowledgeLocally(
   metadata: { originalTitle?: string | null; description?: string | null; authorName?: string | null } | null,
   existingCategories: string[],
   existingTags: string[],
+  shouldStop?: () => boolean,
 ): Promise<ProcessResponse> {
   const ctx = await getContext();
 
@@ -262,6 +270,12 @@ export async function extractKnowledgeLocally(
     `[localExtraction] running inference with Qwen3 4B... transcript words ${transcriptStats.selectedWordCount}/${transcriptStats.originalWordCount} strategy=${transcriptStats.strategy}`,
   );
 
+  const ensureNotStopped = () => {
+    if (shouldStop?.()) {
+      throw new LocalInferenceInterruptedError();
+    }
+  };
+
   const attempts: Array<{ mode: CompletionMode; temperature: number; topP: number }> = [
     { mode: 'prompt-text', temperature: 0.2, topP: 0.85 },
     { mode: 'prompt-text', temperature: 0.45, topP: 0.92 },
@@ -273,7 +287,9 @@ export async function extractKnowledgeLocally(
 
   for (const attempt of attempts) {
     try {
+      ensureNotStopped();
       const result = await attemptCompletion(ctx, prompt, attempt.mode, attempt.temperature, attempt.topP);
+      ensureNotStopped();
       rawText = result.text;
 
       if (!rawText.trim()) {
@@ -317,6 +333,12 @@ export async function extractKnowledgeLocally(
         } : null,
       };
     } catch (err) {
+      if (err instanceof LocalInferenceInterruptedError) {
+        throw err;
+      }
+      if (shouldStop?.()) {
+        throw new LocalInferenceInterruptedError();
+      }
       lastError = err;
       console.warn(`[localExtraction] attempt failed mode=${attempt.mode}:`, err);
     }
