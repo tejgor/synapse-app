@@ -250,7 +250,7 @@ export async function extractKnowledgeLocally(
 ): Promise<ProcessResponse> {
   const ctx = await getContext();
 
-  const prompt = buildLocalKnowledgePrompt(
+  const { prompt, transcriptStats } = buildLocalKnowledgePrompt(
     transcript,
     sourceUrl,
     metadata ?? undefined,
@@ -258,7 +258,9 @@ export async function extractKnowledgeLocally(
     existingTags,
   );
 
-  console.log('[localExtraction] running inference with Qwen3 4B...');
+  console.log(
+    `[localExtraction] running inference with Qwen3 4B... transcript words ${transcriptStats.selectedWordCount}/${transcriptStats.originalWordCount} strategy=${transcriptStats.strategy}`,
+  );
 
   const attempts: Array<{ mode: CompletionMode; temperature: number; topP: number }> = [
     { mode: 'prompt-text', temperature: 0.2, topP: 0.85 },

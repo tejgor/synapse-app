@@ -1,10 +1,4 @@
-const MAX_TRANSCRIPT_WORDS = 2600;
-
-function truncateTranscript(transcript: string): string {
-  const words = transcript.split(/\s+/);
-  if (words.length <= MAX_TRANSCRIPT_WORDS) return transcript;
-  return `${words.slice(0, MAX_TRANSCRIPT_WORDS).join(' ')}\n\n[transcript truncated]`;
-}
+import { selectTranscriptForInference, type TranscriptSelectionStats } from './transcriptBudget';
 
 export function buildLocalKnowledgePrompt(
   transcript: string,
@@ -12,8 +6,8 @@ export function buildLocalKnowledgePrompt(
   metadata?: { originalTitle?: string | null; description?: string | null; authorName?: string | null },
   existingCategories?: string[],
   existingTags?: string[],
-): string {
-  const truncated = truncateTranscript(transcript);
+): { prompt: string; transcriptStats: TranscriptSelectionStats } {
+  const selectedTranscript = selectTranscriptForInference(transcript);
 
   const metaBlock = metadata && (metadata.originalTitle || metadata.description || metadata.authorName)
     ? `\nVideo metadata:${metadata.originalTitle ? `\n- Title: ${metadata.originalTitle}` : ''}${metadata.authorName ? `\n- Creator: ${metadata.authorName}` : ''}${metadata.description ? `\n- Description: ${metadata.description.slice(0, 500)}` : ''}\n`
@@ -27,15 +21,20 @@ export function buildLocalKnowledgePrompt(
     ? `\nExisting tags in the user's library: ${existingTags.join(', ')}\nPrefer reusing existing tags where they fit. You may still create new tags when needed.\n`
     : '';
 
-  return `/no_think
+  const transcriptIntro = selectedTranscript.stats.wasTrimmed
+    ? `Transcript excerpts selected from a longer transcript. Preserve facts exactly, but prioritize the most important ideas that appear across these excerpts.`
+    : 'Transcript:';
+
+  return {
+    prompt: `/no_think
 You are a knowledge extraction assistant.
 Respond with JSON only.
 Do not output reasoning, <think> tags, markdown, explanations, or extra keys.
 Given a short-form video transcript, extract structured, actionable knowledge — not just a summary, but something genuinely useful to reference later.
 
 ${metaBlock}
-Transcript:
-${truncated}
+${transcriptIntro}
+${selectedTranscript.text}
 
 Source URL: ${sourceUrl}
 ${categoryBlock}${tagBlock}
@@ -70,5 +69,7 @@ GUIDELINES:
 - Ignore filler, repetition, sponsor language, and generic motivational phrasing.
 
 Respond with ONLY valid JSON:
-{"title":"...","summary":"...","category":"...","tags":["..."],"contentType":"Tutorial","sections":[{"heading":"Steps","style":"ordered","items":[{"text":"..."}]},{"heading":"At a Glance","style":"key-value","items":[{"label":"Difficulty","text":"Beginner"},{"label":"Time","text":"10 minutes"}]}]}`;
+{"title":"...","summary":"...","category":"...","tags":["..."],"contentType":"Tutorial","sections":[{"heading":"Steps","style":"ordered","items":[{"text":"..."}]},{"heading":"At a Glance","style":"key-value","items":[{"label":"Difficulty","text":"Beginner"},{"label":"Time","text":"10 minutes"}]}]}`,
+    transcriptStats: selectedTranscript.stats,
+  };
 }
