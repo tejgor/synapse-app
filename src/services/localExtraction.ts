@@ -201,8 +201,51 @@ function buildKeyDetails(sections: ContentSection[]): KeyDetail[] {
     .map((item) => ({ label: item.label!, value: item.text }));
 }
 
-const COMPLETION_TIMEOUT_MS = 90_000;
 const THINKING_BUDGET_TOKENS = 300;
+const N_PREDICT = 1500;
+const FIRST_TOKEN_TIMEOUT_BASE_MS = 18_000;
+const FIRST_TOKEN_TIMEOUT_PER_WORD_MS = 10;
+const FIRST_TOKEN_TIMEOUT_MAX_MS = 40_000;
+const INACTIVITY_TIMEOUT_BASE_MS = 12_000;
+const INACTIVITY_TIMEOUT_PER_WORD_MS = 4;
+const INACTIVITY_TIMEOUT_MAX_MS = 22_000;
+const ABSOLUTE_TIMEOUT_BASE_MS = 60_000;
+const ABSOLUTE_TIMEOUT_PER_WORD_MS = 35;
+const ABSOLUTE_TIMEOUT_PER_THINKING_TOKEN_MS = 35;
+const ABSOLUTE_TIMEOUT_MAX_MS = 180_000;
+
+type AdaptiveTimeoutConfig = {
+  firstTokenMs: number;
+  inactivityMs: number;
+  absoluteMs: number;
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function buildAdaptiveTimeoutConfig(selectedWordCount: number, mode: CompletionMode): AdaptiveTimeoutConfig {
+  return {
+    firstTokenMs: clamp(
+      FIRST_TOKEN_TIMEOUT_BASE_MS + (selectedWordCount * FIRST_TOKEN_TIMEOUT_PER_WORD_MS),
+      FIRST_TOKEN_TIMEOUT_BASE_MS,
+      FIRST_TOKEN_TIMEOUT_MAX_MS,
+    ),
+    inactivityMs: clamp(
+      INACTIVITY_TIMEOUT_BASE_MS + (selectedWordCount * INACTIVITY_TIMEOUT_PER_WORD_MS),
+      INACTIVITY_TIMEOUT_BASE_MS,
+      INACTIVITY_TIMEOUT_MAX_MS,
+    ),
+    absoluteMs: clamp(
+      ABSOLUTE_TIMEOUT_BASE_MS
+        + (selectedWordCount * ABSOLUTE_TIMEOUT_PER_WORD_MS)
+        + (THINKING_BUDGET_TOKENS * ABSOLUTE_TIMEOUT_PER_THINKING_TOKEN_MS)
+        + (mode === 'prompt-schema' ? 10_000 : 0),
+      90_000,
+      ABSOLUTE_TIMEOUT_MAX_MS,
+    ),
+  };
+}
 
 async function requestStopCompletion(ctx: Awaited<ReturnType<typeof getContext>>) {
   try {
@@ -216,13 +259,14 @@ async function runCompletion(
   mode: CompletionMode,
   temperature: number,
   topP: number,
+  timeoutConfig: AdaptiveTimeoutConfig,
 ) {
   const common = {
     messages: [{ role: 'user', content: prompt }],
     jinja: true,
     enable_thinking: true,
     thinking_budget_tokens: THINKING_BUDGET_TOKENS,
-    n_predict: 1500,
+    n_predict: N_PREDICT,
     temperature,
     top_p: topP,
     stop: MINIMAL_STOP_TOKENS,
@@ -239,19 +283,62 @@ async function runCompletion(
       }
     : common;
 
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let watchdogHandle: ReturnType<typeof setInterval> | undefined;
+  let settled = false;
+  const startedAt = Date.now();
+  let firstTokenAt: number | null = null;
+  let lastTokenAt = startedAt;
+  let emittedTokens = 0;
+
+  const completionPromise = ctx.completion(params, (data) => {
+    emittedTokens += 1;
+    const now = Date.now();
+    if (firstTokenAt == null) {
+      firstTokenAt = now;
+      console.log(`[localExtraction] first token mode=${mode} after ${((now - startedAt) / 1000).toFixed(1)}s`);
+    }
+    lastTokenAt = now;
+
+    if (emittedTokens % 100 === 0) {
+      console.log(
+        `[localExtraction] progress mode=${mode} tokens=${emittedTokens} elapsed=${((now - startedAt) / 1000).toFixed(1)}s` +
+        ` content=${data.content?.length ?? 0} reasoning=${data.reasoning_content?.length ?? 0}`,
+      );
+    }
+  });
+
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(() => {
-      console.warn('[localExtraction] attempt timed out after 90s — requesting stop');
+    watchdogHandle = setInterval(() => {
+      if (settled) return;
+
+      const now = Date.now();
+      const elapsedMs = now - startedAt;
+      const idleMs = now - lastTokenAt;
+
+      let reason: string | null = null;
+      if (firstTokenAt == null && elapsedMs > timeoutConfig.firstTokenMs) {
+        reason = `no first token after ${(timeoutConfig.firstTokenMs / 1000).toFixed(0)}s`;
+      } else if (firstTokenAt != null && idleMs > timeoutConfig.inactivityMs) {
+        reason = `generation stalled for ${(timeoutConfig.inactivityMs / 1000).toFixed(0)}s after ${emittedTokens} tokens`;
+      } else if (elapsedMs > timeoutConfig.absoluteMs) {
+        reason = `absolute timeout after ${(timeoutConfig.absoluteMs / 1000).toFixed(0)}s`;
+      }
+
+      if (!reason) return;
+
+      settled = true;
+      if (watchdogHandle) clearInterval(watchdogHandle);
+      console.warn(`[localExtraction] ${reason} — requesting stop`);
       void requestStopCompletion(ctx);
-      reject(new Error('completion timed out'));
-    }, COMPLETION_TIMEOUT_MS);
+      reject(new Error(`completion timed out: ${reason}`));
+    }, 1000);
   });
 
   try {
-    return await Promise.race([ctx.completion(params), timeoutPromise]);
+    return await Promise.race([completionPromise, timeoutPromise]);
   } finally {
-    clearTimeout(timeoutHandle);
+    settled = true;
+    if (watchdogHandle) clearInterval(watchdogHandle);
   }
 }
 
@@ -261,13 +348,22 @@ async function attemptCompletion(
   mode: CompletionMode,
   temperature: number,
   topP: number,
+  selectedWordCount: number,
 ) {
-  console.log(`[localExtraction] attempt mode=${mode} temperature=${temperature} top_p=${topP} thinking_budget=${THINKING_BUDGET_TOKENS}`);
+  const timeoutConfig = buildAdaptiveTimeoutConfig(selectedWordCount, mode);
+  console.log(
+    `[localExtraction] attempt mode=${mode} temperature=${temperature} top_p=${topP} thinking_budget=${THINKING_BUDGET_TOKENS}` +
+    ` n_predict=${N_PREDICT} timeouts(first=${(timeoutConfig.firstTokenMs / 1000).toFixed(0)}s idle=${(timeoutConfig.inactivityMs / 1000).toFixed(0)}s max=${(timeoutConfig.absoluteMs / 1000).toFixed(0)}s)`,
+  );
   const t0 = Date.now();
-  const result = await runCompletion(ctx, prompt, mode, temperature, topP);
+  const result = await runCompletion(ctx, prompt, mode, temperature, topP, timeoutConfig);
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   const stoppedByLimit = (result as any).stopped_limit === true;
-  console.log(`[localExtraction] attempt complete mode=${mode} in ${elapsed}s — ${result.text.length} chars${stoppedByLimit ? ' (TRUNCATED by token limit)' : ''}`);
+  const interrupted = (result as any).interrupted === true;
+  console.log(
+    `[localExtraction] attempt complete mode=${mode} in ${elapsed}s — ${result.text.length} chars` +
+    `${stoppedByLimit ? ' (TRUNCATED by token limit)' : ''}${interrupted ? ' (INTERRUPTED)' : ''}`,
+  );
   return result;
 }
 
@@ -310,7 +406,14 @@ export async function extractKnowledgeLocally(
   for (const attempt of attempts) {
     try {
       ensureNotStopped();
-      const result = await attemptCompletion(ctx, prompt, attempt.mode, attempt.temperature, attempt.topP);
+      const result = await attemptCompletion(
+        ctx,
+        prompt,
+        attempt.mode,
+        attempt.temperature,
+        attempt.topP,
+        transcriptStats.selectedWordCount,
+      );
       ensureNotStopped();
       rawText = result.text;
 
