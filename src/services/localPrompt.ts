@@ -14,11 +14,11 @@ export function buildLocalKnowledgePrompt(
     : '';
 
   const categoryBlock = existingCategories && existingCategories.length > 0
-    ? `\nThe user's library already has these categories: ${existingCategories.join(', ')}\nStrongly prefer assigning to one of these existing categories. Only create a new category if none reasonably fit this content.\n`
+    ? `\nThe user's library already has these categories: ${existingCategories.slice(0, 30).join(', ')}\nStrongly prefer assigning to one of these existing categories. Only create a new category if none reasonably fit this content.\n`
     : '';
 
   const tagBlock = existingTags && existingTags.length > 0
-    ? `\nExisting tags in the user's library: ${existingTags.join(', ')}\nPrefer reusing existing tags where they fit. You may still create new tags when needed.\n`
+    ? `\nExisting tags in the user's library: ${existingTags.slice(0, 50).join(', ')}\nPrefer reusing existing tags where they fit. You may still create new tags when needed.\n`
     : '';
 
   const transcriptIntro = selectedTranscript.stats.wasTrimmed

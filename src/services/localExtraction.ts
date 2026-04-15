@@ -201,6 +201,8 @@ function buildKeyDetails(sections: ContentSection[]): KeyDetail[] {
     .map((item) => ({ label: item.label!, value: item.text }));
 }
 
+const COMPLETION_TIMEOUT_MS = 90_000;
+
 async function runCompletion(
   ctx: Awaited<ReturnType<typeof getContext>>,
   prompt: string,
@@ -210,26 +212,37 @@ async function runCompletion(
 ) {
   const common = {
     prompt,
-    n_predict: 2200,
+    n_predict: 1500,
     temperature,
     top_p: topP,
+    stop: MINIMAL_STOP_TOKENS,
+    penalty_repeat: 1.1,
   };
 
-  if (mode === 'prompt-text') {
-    return ctx.completion(common);
-  }
+  const params = mode === 'prompt-schema'
+    ? {
+        ...common,
+        response_format: {
+          type: 'json_schema' as const,
+          json_schema: { strict: true, schema: RESPONSE_SCHEMA },
+        },
+      }
+    : common;
 
-  return ctx.completion({
-    ...common,
-    stop: MINIMAL_STOP_TOKENS,
-    response_format: {
-      type: 'json_schema' as const,
-      json_schema: {
-        strict: true,
-        schema: RESPONSE_SCHEMA,
-      },
-    },
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      console.warn('[localExtraction] attempt timed out after 90s — requesting stop');
+      ctx.stopCompletion().catch(() => {});
+      reject(new Error('completion timed out'));
+    }, COMPLETION_TIMEOUT_MS);
   });
+
+  try {
+    return await Promise.race([ctx.completion(params), timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 }
 
 async function attemptCompletion(
@@ -278,7 +291,6 @@ export async function extractKnowledgeLocally(
 
   const attempts: Array<{ mode: CompletionMode; temperature: number; topP: number }> = [
     { mode: 'prompt-text', temperature: 0.2, topP: 0.85 },
-    { mode: 'prompt-text', temperature: 0.45, topP: 0.92 },
     { mode: 'prompt-schema', temperature: 0.2, topP: 0.85 },
   ];
 

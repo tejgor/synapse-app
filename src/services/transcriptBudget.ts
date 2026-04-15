@@ -15,6 +15,16 @@ const MEDIUM_TRANSCRIPT_WORD_LIMIT = 3200;
 const MEDIUM_SELECTION_WORD_LIMIT = 1800;
 const LARGE_SELECTION_WORD_LIMIT = 1400;
 
+export const LOCAL_CLOUD_FALLBACK_WORD_THRESHOLD = 3200;
+
+export function countTranscriptWords(transcript: string): number {
+  return transcript.trim().split(/\s+/).filter(Boolean).length;
+}
+
+export function isTranscriptOversizedForLocal(transcript: string): boolean {
+  return countTranscriptWords(transcript) >= LOCAL_CLOUD_FALLBACK_WORD_THRESHOLD;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }

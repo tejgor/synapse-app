@@ -1,11 +1,17 @@
 import { Platform, AppState } from 'react-native';
 import { getEntryById, updateEntry, getPendingEntries, getCategories, getTags } from '../db/entries';
 import { processEntry as callProcessAPI, ApiError } from './api';
-import { getProcessingMode, getLocalInferencePaused, setLocalInferencePaused } from './settings';
+import {
+  getProcessingMode,
+  getLocalInferencePaused,
+  setLocalInferencePaused,
+  getAutoCloudLongTranscripts,
+} from './settings';
 import { getBackendConfig } from './backendConfig';
 import { isModelReady } from './modelManager';
 import { markBusy, markIdle, stopActiveCompletion } from './llmContext';
 import { extractKnowledgeLocally, LocalInferenceInterruptedError } from './localExtraction';
+import { countTranscriptWords, isTranscriptOversizedForLocal } from './transcriptBudget';
 import type { ProcessResponse } from '../types';
 
 // Background task module — iOS only
@@ -150,6 +156,11 @@ export async function resumeLocalInference(): Promise<void> {
   notifyLocalInferenceState();
 
   void drainInferenceQueue();
+}
+
+async function shouldFallbackLongTranscriptToCloud(transcript: string): Promise<boolean> {
+  if (!isTranscriptOversizedForLocal(transcript)) return false;
+  return getAutoCloudLongTranscripts();
 }
 
 export async function prioritizeLocalInference(entryId: string, options?: { resumeIfPaused?: boolean }): Promise<void> {
@@ -325,6 +336,22 @@ async function runLocalInference(entryId: string): Promise<void> {
   notifyUpdate();
 }
 
+async function routeOversizedTranscriptToCloud(
+  entryId: string,
+  transcript: string,
+  entry?: Awaited<ReturnType<typeof getEntryById>> | null,
+): Promise<boolean> {
+  const shouldFallback = await shouldFallbackLongTranscriptToCloud(transcript);
+  if (!shouldFallback) return false;
+
+  const wordCount = countTranscriptWords(transcript);
+  console.log(`[processing] transcript too long for local inference entryId=${entryId} words=${wordCount} — routing to cloud`);
+  await updateEntry(entryId, { processing_status: 'processing', processing_phase: null });
+  notifyUpdate();
+  await processEntryCloud(entryId, entry ?? undefined);
+  return true;
+}
+
 // ─── Handle a completed background request result ─────────────────────────────
 
 function isTranscriptOnlyResult(parsed: Record<string, unknown>): boolean {
@@ -386,6 +413,11 @@ export async function handleBackgroundResult(event: {
       console.log(`[processing] transcript stored entryId=${entryId}`);
       notifyUpdate();
 
+      const currentEntry = await getEntryById(entryId);
+      if (await routeOversizedTranscriptToCloud(entryId, parsed.videoTranscript as string, currentEntry)) {
+        return;
+      }
+
       if (AppState.currentState === 'active') {
         enqueueLocalInference(entryId);
       } else {
@@ -436,8 +468,12 @@ async function processEntryLocally(entryId: string): Promise<void> {
     return;
   }
 
-  // If transcript already stored (retry case), go straight to inference
+  // If transcript already stored (retry case), go straight to inference unless it should fall back to cloud
   if (entry.video_transcript) {
+    if (await routeOversizedTranscriptToCloud(entryId, entry.video_transcript, entry)) {
+      return;
+    }
+
     console.log(`[processing] local — transcript exists, queuing inference entryId=${entryId}`);
     enqueueLocalInference(entryId);
     return;

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,15 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
+import Constants from 'expo-constants';
 import { colors, spacing, borderRadius, typography } from '@/src/constants/theme';
 import {
   getProcessingMode,
   setProcessingMode,
   getBackendTarget,
   setBackendTarget,
+  getAutoCloudLongTranscripts,
+  setAutoCloudLongTranscripts,
   type ProcessingMode,
   type BackendTarget,
 } from '@/src/services/settings';
@@ -30,6 +33,7 @@ import {
   resumeLocalInference,
   type LocalInferenceState,
 } from '@/src/services/processing';
+import { LOCAL_CLOUD_FALLBACK_WORD_THRESHOLD } from '@/src/services/transcriptBudget';
 
 const DEFAULT_LOCAL_INFERENCE_STATE: LocalInferenceState = {
   paused: false,
@@ -45,13 +49,23 @@ export default function SettingsScreen() {
   const { state: modelState, startDownload, cancel, remove, refresh } = useModelStatus();
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [localInferenceState, setLocalInferenceState] = useState<LocalInferenceState>(DEFAULT_LOCAL_INFERENCE_STATE);
+  const [autoCloudLongTranscripts, setAutoCloudLongTranscriptsState] = useState(true);
+  const [showDevOptions, setShowDevOptions] = useState(false);
+  const [devSectionVisible, setDevSectionVisible] = useState(false);
+  const devHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const devBackendConfigured = hasDevBackendConfigured();
 
   useFocusEffect(
     useCallback(() => {
-      Promise.all([getProcessingMode(), getBackendTarget(), getLocalInferenceState()]).then(async ([storedMode, storedBackendTarget, inferenceState]) => {
+      Promise.all([
+        getProcessingMode(),
+        getBackendTarget(),
+        getLocalInferenceState(),
+        getAutoCloudLongTranscripts(),
+      ]).then(async ([storedMode, storedBackendTarget, inferenceState, storedAutoCloudLongTranscripts]) => {
         setMode(storedMode);
         setLocalInferenceState(inferenceState);
+        setAutoCloudLongTranscriptsState(storedAutoCloudLongTranscripts);
         if (!devBackendConfigured && storedBackendTarget === 'dev') {
           setBackendTargetState('prod');
           await setBackendTarget('prod');
@@ -109,6 +123,11 @@ export default function SettingsScreen() {
     await resumeLocalInference();
   };
 
+  const toggleAutoCloudLongTranscripts = async (value: boolean) => {
+    setAutoCloudLongTranscriptsState(value);
+    await setAutoCloudLongTranscripts(value);
+  };
+
   const localQueueCount = localInferenceState.queuedEntryIds.length + (localInferenceState.currentEntryId ? 1 : 0);
   const localStatusText = localInferenceState.stopping
     ? 'Pausing current on-device extraction…'
@@ -119,6 +138,16 @@ export default function SettingsScreen() {
         : localQueueCount > 0
           ? `Ready to resume • ${localQueueCount} queued`
           : 'Idle';
+
+  const handleCancelDownload = async () => {
+    await cancel();
+  };
+
+  const localQueueSummary = localInferenceState.currentEntryId
+    ? `${localInferenceState.queuedEntryIds.length > 0 ? `${localInferenceState.queuedEntryIds.length} queued` : 'No queue'} · 1 active`
+    : localInferenceState.queuedEntryIds.length > 0
+      ? `${localInferenceState.queuedEntryIds.length} queued`
+      : 'No queued items';
 
   const handleDelete = () => {
     Alert.alert(
@@ -143,7 +172,6 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Processing Mode */}
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>PROCESSING</Text>
         <View style={styles.card}>
@@ -151,7 +179,7 @@ export default function SettingsScreen() {
             <View style={styles.rowTextBlock}>
               <Text style={styles.rowTitle}>On-device processing</Text>
               <Text style={styles.rowSubtitle}>
-                {`Use ${LOCAL_MODEL_INFO.name} to extract knowledge locally instead of cloud AI`}
+                {`Use ${LOCAL_MODEL_INFO.name} locally instead of cloud AI`}
               </Text>
             </View>
             <Switch
@@ -161,108 +189,18 @@ export default function SettingsScreen() {
               thumbColor={colors.text}
             />
           </View>
-        </View>
-        {mode === 'local' && (
-          <>
-            <Text style={styles.hint}>
-              Transcript fetching still requires internet. Only AI extraction runs on-device.
-            </Text>
 
-            <View style={styles.localControlCard}>
-              <View style={styles.localControlHeader}>
-                <View style={styles.rowTextBlock}>
-                  <Text style={styles.rowTitle}>Local inference controls</Text>
-                  <Text style={styles.rowSubtitle}>
-                    Pause on-device extraction when you want to switch context, then resume later.
-                  </Text>
-                </View>
-                <Text style={styles.localStatusBadge}>{localStatusText}</Text>
-              </View>
+          <View style={styles.cardDivider} />
 
-              {localInferenceState.currentEntryId && (
-                <Text style={styles.localQueueMeta} numberOfLines={1}>
-                  Current entry: {localInferenceState.currentEntryId}
-                </Text>
-              )}
-
-              {localInferenceState.queuedEntryIds.length > 0 && (
-                <Text style={styles.localQueueMeta}>
-                  Queued entries: {localInferenceState.queuedEntryIds.length}
-                </Text>
-              )}
-
-              <View style={styles.localControlActions}>
-                <Pressable
-                  style={[
-                    styles.localControlButton,
-                    styles.localPauseButton,
-                    (localInferenceState.paused || (!localInferenceState.running && localInferenceState.queuedEntryIds.length === 0)) && styles.localControlButtonDisabled,
-                  ]}
-                  onPress={handlePauseLocalAI}
-                  disabled={localInferenceState.paused || (!localInferenceState.running && localInferenceState.queuedEntryIds.length === 0)}
-                >
-                  <Ionicons name="pause-outline" size={16} color={colors.text} />
-                  <Text style={styles.localControlButtonText}>Pause</Text>
-                </Pressable>
-
-                <Pressable
-                  style={[
-                    styles.localControlButton,
-                    styles.localResumeButton,
-                    !localInferenceState.paused && styles.localControlButtonDisabled,
-                  ]}
-                  onPress={handleResumeLocalAI}
-                  disabled={!localInferenceState.paused}
-                >
-                  <Ionicons name="play-outline" size={16} color={colors.text} />
-                  <Text style={styles.localControlButtonText}>Resume</Text>
-                </Pressable>
-              </View>
-            </View>
-          </>
-        )}
-      </View>
-
-      {/* Backend */}
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>BACKEND</Text>
-        <View style={styles.card}>
-          <View style={styles.row}>
+          <View style={styles.modelHeaderCompact}>
             <View style={styles.rowTextBlock}>
-              <Text style={styles.rowTitle}>Use development backend</Text>
-              <Text style={styles.rowSubtitle}>
-                Switch future requests between production and your local/dev API without rebuilding
+              <Text style={styles.rowTitle}>Model</Text>
+              <Text style={styles.modelMetaCompact}>
+                {LOCAL_MODEL_INFO.name}  ·  {LOCAL_MODEL_INFO.quant}  ·  {LOCAL_MODEL_INFO.approxSizeLabel}
               </Text>
-            </View>
-            <Switch
-              value={backendTarget === 'dev'}
-              onValueChange={toggleBackendTarget}
-              disabled={!devBackendConfigured}
-              trackColor={{ false: colors.border, true: colors.accent }}
-              thumbColor={colors.text}
-            />
-          </View>
-
-          <View style={styles.backendMetaBlock}>
-            <Text style={styles.backendBadge}>{backendTarget === 'dev' ? 'Development' : 'Production'}</Text>
-            <Text style={styles.backendUrl}>{getBackendUrlPreview(backendTarget)}</Text>
-            {!devBackendConfigured && (
-              <Text style={styles.warningText}>
-                Add EXPO_PUBLIC_DEV_API_URL to .env to enable this switch.
+              <Text style={styles.modelRecommendation}>
+                {LOCAL_MODEL_INFO.recommendedDeviceLabel}
               </Text>
-            )}
-          </View>
-        </View>
-      </View>
-
-      {/* Model Management */}
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>MODEL</Text>
-        <View style={styles.card}>
-          <View style={styles.modelHeader}>
-            <View>
-              <Text style={styles.rowTitle}>{LOCAL_MODEL_INFO.name}</Text>
-              <Text style={styles.modelMeta}>{LOCAL_MODEL_INFO.parameterLabel}  |  {LOCAL_MODEL_INFO.quant}  |  {LOCAL_MODEL_INFO.approxSizeLabel}</Text>
             </View>
             {modelState === 'ready' && (
               <View style={styles.readyBadge}>
@@ -278,14 +216,19 @@ export default function SettingsScreen() {
                 <Ionicons name="cloud-download-outline" size={18} color={colors.text} />
                 <Text style={styles.downloadBtnText}>Download model</Text>
               </Pressable>
-              <Text style={styles.hint}>Recommended: connect to Wi-Fi before downloading</Text>
+              <Text style={styles.inlineHint}>Recommended: use Wi-Fi for the initial download</Text>
             </>
           )}
 
           {modelState === 'downloading' && (
-            <View style={styles.downloadingSection}>
-              <ActivityIndicator size="small" color={colors.accent} />
-              <Text style={styles.downloadingText}>Downloading {LOCAL_MODEL_INFO.approxSizeLabel}...</Text>
+            <View style={styles.downloadRowCompact}>
+              <View style={styles.downloadStatusCompact}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={styles.downloadingText}>Downloading {LOCAL_MODEL_INFO.approxSizeLabel}...</Text>
+              </View>
+              <Pressable style={styles.ghostButton} onPress={handleCancelDownload}>
+                <Text style={styles.ghostButtonText}>Cancel</Text>
+              </Pressable>
             </View>
           )}
 
@@ -299,29 +242,133 @@ export default function SettingsScreen() {
           {downloadError && (
             <Text style={styles.errorText}>{downloadError}</Text>
           )}
+
+          {mode === 'local' && (
+            <>
+              <View style={styles.cardDivider} />
+              <Text style={styles.inlineHint}>
+                Transcript fetching still requires internet. Only the AI extraction runs on-device.
+              </Text>
+
+              <View style={styles.localControlCardCompact}>
+                <View style={styles.compactHeaderRow}>
+                  <Text style={styles.compactSectionTitle}>Local inference</Text>
+                  <Text style={styles.localStatusBadge}>{localStatusText}</Text>
+                </View>
+                <Text style={styles.localQueueMeta}>{localQueueSummary}</Text>
+                <View style={styles.localControlActionsCompact}>
+                  <Pressable
+                    style={[
+                      styles.localControlButton,
+                      styles.localPauseButton,
+                      (localInferenceState.paused || (!localInferenceState.running && localInferenceState.queuedEntryIds.length === 0)) && styles.localControlButtonDisabled,
+                    ]}
+                    onPress={handlePauseLocalAI}
+                    disabled={localInferenceState.paused || (!localInferenceState.running && localInferenceState.queuedEntryIds.length === 0)}
+                  >
+                    <Ionicons name="pause-outline" size={16} color={colors.text} />
+                    <Text style={styles.localControlButtonText}>Pause</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.localControlButton,
+                      styles.localResumeButton,
+                      !localInferenceState.paused && styles.localControlButtonDisabled,
+                    ]}
+                    onPress={handleResumeLocalAI}
+                    disabled={!localInferenceState.paused}
+                  >
+                    <Ionicons name="play-outline" size={16} color={colors.text} />
+                    <Text style={styles.localControlButtonText}>Resume</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={styles.localPolicyCardCompact}>
+                <View style={styles.row}>
+                  <View style={styles.rowTextBlock}>
+                    <Text style={styles.compactSectionTitle}>Long transcript fallback</Text>
+                    <Text style={styles.compactSubtitle}>
+                      {`${LOCAL_CLOUD_FALLBACK_WORD_THRESHOLD.toLocaleString()}+ words → use cloud automatically`}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={autoCloudLongTranscripts}
+                    onValueChange={toggleAutoCloudLongTranscripts}
+                    trackColor={{ false: colors.border, true: colors.accent }}
+                    thumbColor={colors.text}
+                  />
+                </View>
+              </View>
+            </>
+          )}
         </View>
       </View>
 
-      {/* Info */}
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>ABOUT ON-DEVICE AI</Text>
-        <View style={styles.card}>
-          <InfoRow icon="hardware-chip-outline" text={LOCAL_MODEL_INFO.recommendedDeviceLabel} />
-          <InfoRow icon="flash-outline" text={LOCAL_MODEL_INFO.speedLabel} />
-          <InfoRow icon="lock-closed-outline" text="Fully private — data stays on device" />
-          <InfoRow icon="alert-circle-outline" text="Quality may differ from cloud processing" />
+      {devSectionVisible && (
+        <View style={styles.section}>
+          <Pressable style={styles.devToggle} onPress={() => setShowDevOptions((value) => !value)}>
+            <View>
+              <Text style={styles.devToggleLabel}>Developer</Text>
+              <Text style={styles.devToggleSubtitle}>
+                {backendTarget === 'dev' ? 'Development backend active' : 'Production backend active'}
+              </Text>
+            </View>
+            <Ionicons
+              name={showDevOptions ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={colors.textPlaceholder}
+            />
+          </Pressable>
+
+          {showDevOptions && (
+            <View style={styles.devCard}>
+              <View style={styles.row}>
+                <View style={styles.rowTextBlock}>
+                  <Text style={styles.rowTitle}>Use development backend</Text>
+                  <Text style={styles.rowSubtitle}>
+                    Switch future requests between production and your local/dev API.
+                  </Text>
+                </View>
+                <Switch
+                  value={backendTarget === 'dev'}
+                  onValueChange={toggleBackendTarget}
+                  disabled={!devBackendConfigured}
+                  trackColor={{ false: colors.border, true: colors.accent }}
+                  thumbColor={colors.text}
+                />
+              </View>
+
+              <View style={styles.backendMetaBlock}>
+                <Text style={styles.backendBadge}>{backendTarget === 'dev' ? 'Development' : 'Production'}</Text>
+                <Text style={styles.backendUrl}>{getBackendUrlPreview(backendTarget)}</Text>
+                {!devBackendConfigured && (
+                  <Text style={styles.warningText}>
+                    Add EXPO_PUBLIC_DEV_API_URL to .env to enable this switch.
+                  </Text>
+                )}
+              </View>
+            </View>
+          )}
         </View>
-      </View>
+      )}
+
+      <Pressable
+        style={styles.versionFooter}
+        onPressIn={() => {
+          devHoldTimer.current = setTimeout(() => setDevSectionVisible(true), 5000);
+        }}
+        onPressOut={() => {
+          if (devHoldTimer.current) {
+            clearTimeout(devHoldTimer.current);
+            devHoldTimer.current = null;
+          }
+        }}
+      >
+        <Text style={styles.versionText}>v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
+      </Pressable>
     </ScrollView>
-  );
-}
-
-function InfoRow({ icon, text }: { icon: string; text: string }) {
-  return (
-    <View style={styles.infoRow}>
-      <Ionicons name={icon as any} size={16} color={colors.textTertiary} />
-      <Text style={styles.infoText}>{text}</Text>
-    </View>
   );
 }
 
@@ -355,42 +402,108 @@ const styles = StyleSheet.create({
   rowTitle: { color: colors.text, fontSize: 15, fontWeight: '600' },
   rowSubtitle: { color: colors.textTertiary, fontSize: 13, marginTop: 2, lineHeight: 18 },
 
-  hint: {
+  cardDivider: {
+    height: 1,
+    backgroundColor: colors.borderSubtle,
+    marginVertical: spacing.md,
+  },
+  inlineHint: {
     color: colors.textPlaceholder,
     fontSize: 12,
-    marginTop: spacing.sm,
-    marginLeft: spacing.xs,
+    lineHeight: 17,
   },
 
-  localControlCard: {
+  modelHeaderCompact: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+  },
+  modelMetaCompact: {
+    ...typography.mono,
+    color: colors.textTertiary,
+    marginTop: 4,
+    fontSize: 11,
+  },
+  modelRecommendation: {
+    color: colors.textPlaceholder,
+    fontSize: 11,
+    marginTop: 3,
+  },
+  downloadRowCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  downloadStatusCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  ghostButton: {
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  ghostButtonText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  localControlCardCompact: {
     marginTop: spacing.md,
     backgroundColor: colors.surfaceRaised,
     borderRadius: borderRadius.sm,
-    padding: spacing.md,
+    padding: spacing.sm + 2,
     gap: spacing.sm,
   },
-  localControlHeader: {
+  localPolicyCardCompact: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: borderRadius.sm,
+    padding: spacing.sm + 2,
+  },
+  compactHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: spacing.sm,
+  },
+  compactSectionTitle: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  compactSubtitle: {
+    color: colors.textTertiary,
+    fontSize: 12,
+    marginTop: 2,
+    lineHeight: 17,
   },
   localStatusBadge: {
     alignSelf: 'flex-start',
     color: colors.text,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     backgroundColor: colors.background,
     borderRadius: borderRadius.xs,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
   },
   localQueueMeta: {
     ...typography.mono,
     color: colors.textSecondary,
-    fontSize: 12,
+    fontSize: 11,
   },
-  localControlActions: {
+  localControlActionsCompact: {
     flexDirection: 'row',
     gap: spacing.sm,
-    marginTop: spacing.xs,
   },
   localControlButton: {
     flex: 1,
@@ -399,7 +512,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     borderRadius: borderRadius.sm,
-    paddingVertical: 10,
+    paddingVertical: 9,
   },
   localPauseButton: {
     backgroundColor: colors.borderSubtle,
@@ -412,7 +525,7 @@ const styles = StyleSheet.create({
   },
   localControlButtonText: {
     color: colors.text,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
 
@@ -438,14 +551,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
 
-  modelHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.md,
-  },
-  modelMeta: { ...typography.mono, color: colors.textTertiary, marginTop: 4 },
-
   readyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -462,6 +567,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    marginTop: spacing.md,
     backgroundColor: colors.accent,
     borderRadius: borderRadius.sm,
     paddingVertical: 12,
@@ -482,6 +588,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
+    marginTop: spacing.md,
     borderWidth: 1,
     borderColor: colors.error,
     borderRadius: borderRadius.sm,
@@ -492,11 +599,39 @@ const styles = StyleSheet.create({
   errorText: { color: colors.error, fontSize: 13, marginTop: spacing.sm },
   warningText: { color: colors.warning, fontSize: 12, marginTop: spacing.xs },
 
-  infoRow: {
+  devToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.sm,
   },
-  infoText: { color: colors.textSecondary, fontSize: 13, flex: 1, lineHeight: 18 },
+  devToggleLabel: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  devToggleSubtitle: {
+    color: colors.textPlaceholder,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  devCard: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+
+  versionFooter: {
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+    marginTop: spacing.sm,
+  },
+  versionText: {
+    color: colors.textPlaceholder,
+    fontSize: 11,
+  },
 });

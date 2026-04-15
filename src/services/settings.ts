@@ -9,6 +9,7 @@ const KEYS = {
   modelDownloadState: 'synapse:modelDownloadState',
   backendTarget: 'synapse:backendTarget',
   localInferencePaused: 'synapse:localInferencePaused',
+  autoCloudLongTranscripts: 'synapse:autoCloudLongTranscripts',
 } as const;
 
 export async function getProcessingMode(): Promise<ProcessingMode> {
@@ -45,4 +46,13 @@ export async function getLocalInferencePaused(): Promise<boolean> {
 
 export async function setLocalInferencePaused(paused: boolean): Promise<void> {
   await AsyncStorage.setItem(KEYS.localInferencePaused, paused ? 'true' : 'false');
+}
+
+export async function getAutoCloudLongTranscripts(): Promise<boolean> {
+  const value = await AsyncStorage.getItem(KEYS.autoCloudLongTranscripts);
+  return value == null ? true : value === 'true';
+}
+
+export async function setAutoCloudLongTranscripts(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(KEYS.autoCloudLongTranscripts, enabled ? 'true' : 'false');
 }
