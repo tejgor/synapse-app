@@ -592,6 +592,18 @@ export async function processEntry(entryId: string): Promise<void> {
   processEntryCloud(entryId);
 }
 
+// ─── Re-run AI analysis on an existing entry with explicit mode ──────────────
+
+export async function reprocessEntry(entryId: string, mode: 'cloud' | 'local'): Promise<void> {
+  await updateEntry(entryId, { processing_status: 'pending', processing_phase: null });
+  notifyUpdate();
+
+  if (mode === 'local' && await isModelReady()) {
+    return processEntryLocally(entryId);
+  }
+  return processEntryCloud(entryId);
+}
+
 // ─── Retry pending/failed entries on launch ───────────────────────────────────
 
 export async function retryFailedEntries(): Promise<void> {
