@@ -202,6 +202,13 @@ function buildKeyDetails(sections: ContentSection[]): KeyDetail[] {
 }
 
 const COMPLETION_TIMEOUT_MS = 90_000;
+const THINKING_BUDGET_TOKENS = 300;
+
+async function requestStopCompletion(ctx: Awaited<ReturnType<typeof getContext>>) {
+  try {
+    await Promise.resolve(ctx.stopCompletion());
+  } catch {}
+}
 
 async function runCompletion(
   ctx: Awaited<ReturnType<typeof getContext>>,
@@ -211,7 +218,10 @@ async function runCompletion(
   topP: number,
 ) {
   const common = {
-    prompt,
+    messages: [{ role: 'user', content: prompt }],
+    jinja: true,
+    enable_thinking: true,
+    thinking_budget_tokens: THINKING_BUDGET_TOKENS,
     n_predict: 1500,
     temperature,
     top_p: topP,
@@ -233,7 +243,7 @@ async function runCompletion(
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutHandle = setTimeout(() => {
       console.warn('[localExtraction] attempt timed out after 90s — requesting stop');
-      ctx.stopCompletion().catch(() => {});
+      void requestStopCompletion(ctx);
       reject(new Error('completion timed out'));
     }, COMPLETION_TIMEOUT_MS);
   });
@@ -252,7 +262,7 @@ async function attemptCompletion(
   temperature: number,
   topP: number,
 ) {
-  console.log(`[localExtraction] attempt mode=${mode} temperature=${temperature} top_p=${topP}`);
+  console.log(`[localExtraction] attempt mode=${mode} temperature=${temperature} top_p=${topP} thinking_budget=${THINKING_BUDGET_TOKENS}`);
   const t0 = Date.now();
   const result = await runCompletion(ctx, prompt, mode, temperature, topP);
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);

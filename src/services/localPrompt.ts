@@ -26,10 +26,9 @@ export function buildLocalKnowledgePrompt(
     : 'Transcript:';
 
   return {
-    prompt: `/no_think
-You are a knowledge extraction assistant.
-Respond with JSON only.
-Do not output reasoning, <think> tags, markdown, explanations, or extra keys.
+    prompt: `You are a knowledge extraction assistant.
+You may reason briefly before answering, but the final answer must be valid JSON only.
+Do not output markdown, explanations, or extra keys outside the JSON object.
 Given a short-form video transcript, extract structured, actionable knowledge — not just a summary, but something genuinely useful to reference later.
 
 ${metaBlock}
