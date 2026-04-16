@@ -32,7 +32,7 @@ import { detectPlatform } from '@/src/services/thumbnail';
 import { createEntry } from '@/src/db/entries';
 import { processEntry } from '@/src/services/processing';
 import type { SourcePlatform } from '@/src/types';
-import { useHeightReveal, useCollapseAnimation } from '@/src/utils/animations';
+import { useHeightReveal } from '@/src/utils/animations';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -81,28 +81,44 @@ function AmbientNode() {
 // ─── Checkmark ────────────────────────────────────────────────────────────────
 
 function CheckmarkFlash({ visible }: { visible: boolean }) {
-  const scale = useSharedValue(0.2);
+  const scale = useSharedValue(0.6);
   const opacity = useSharedValue(0);
+  const haloScale = useSharedValue(0.7);
+  const haloOpacity = useSharedValue(0);
 
   useEffect(() => {
     if (visible) {
-      scale.value = withSpring(1, animation.spring.snappy);
-      opacity.value = withTiming(1, { duration: 150 });
+      scale.value = withSpring(1, { damping: 16, stiffness: 200, mass: 1 });
+      opacity.value = withTiming(1, { duration: 180, easing: Easing.out(Easing.cubic) });
+      haloScale.value = withTiming(1.8, { duration: 620, easing: Easing.out(Easing.cubic) });
+      haloOpacity.value = withSequence(
+        withTiming(0.35, { duration: 140, easing: Easing.out(Easing.cubic) }),
+        withTiming(0, { duration: 480, easing: Easing.out(Easing.cubic) })
+      );
     } else {
-      scale.value = withTiming(0.2, { duration: 200 });
-      opacity.value = withTiming(0, { duration: 200 });
+      scale.value = withTiming(0.6, { duration: 180 });
+      opacity.value = withTiming(0, { duration: 180 });
+      haloScale.value = 0.7;
+      haloOpacity.value = 0;
     }
   }, [visible]);
 
+  const markStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
+  }));
+  const haloStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: haloScale.value }],
+    opacity: haloOpacity.value,
+  }));
+
   return (
-    <Animated.View
-      style={[styles.checkmark, useAnimatedStyle(() => ({
-        transform: [{ scale: scale.value }],
-        opacity: opacity.value,
-      }))]}
-    >
-      <Ionicons name="checkmark-circle" size={60} color={colors.accent} />
-    </Animated.View>
+    <View pointerEvents="none" style={styles.checkmark}>
+      <Animated.View style={[styles.checkmarkHalo, haloStyle]} />
+      <Animated.View style={markStyle}>
+        <Ionicons name="checkmark-circle" size={64} color={colors.accent} />
+      </Animated.View>
+    </View>
   );
 }
 
@@ -118,11 +134,16 @@ export default function CaptureScreen() {
   const inputRef = useRef<TextInput>(null);
 
   const backdropOpacity = useSharedValue(0);
-  const { trigger: triggerCollapse, animatedStyle: collapseStyle } = useCollapseAnimation();
+  const cardTranslateY = useSharedValue(28);
+  const cardScale = useSharedValue(0.97);
+  const cardOpacity = useSharedValue(0);
 
   useEffect(() => {
-    backdropOpacity.value = withTiming(1, { duration: 280 });
-    setTimeout(() => inputRef.current?.focus(), 320);
+    backdropOpacity.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) });
+    cardOpacity.value = withDelay(80, withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) }));
+    cardTranslateY.value = withDelay(80, withSpring(0, { damping: 24, stiffness: 240, mass: 1 }));
+    cardScale.value = withDelay(80, withSpring(1, { damping: 22, stiffness: 220, mass: 1 }));
+    setTimeout(() => inputRef.current?.focus(), 340);
   }, []);
 
   useEffect(() => {
@@ -130,10 +151,16 @@ export default function CaptureScreen() {
   }, [url]);
 
   const backdropStyle = useAnimatedStyle(() => ({ opacity: backdropOpacity.value }));
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: cardOpacity.value,
+    transform: [
+      { translateY: cardTranslateY.value },
+      { scale: cardScale.value },
+    ],
+  }));
 
   const dismiss = useCallback(() => {
-    backdropOpacity.value = withTiming(0, { duration: 200 });
-    setTimeout(() => router.back(), 200);
+    router.back();
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -154,19 +181,27 @@ export default function CaptureScreen() {
       });
       processEntry(id);
 
-      triggerCollapse(() => {
+      // Card lifts and fades as the checkmark resolves in.
+      const fadeOpts = { duration: 220, easing: Easing.out(Easing.cubic) };
+      cardOpacity.value = withTiming(0, fadeOpts);
+      cardTranslateY.value = withTiming(-6, fadeOpts);
+      cardScale.value = withTiming(0.985, fadeOpts);
+
+      setTimeout(() => {
         setSaving(false);
         setShowCheck(true);
+      }, 120);
+
+      // Hold on the checkmark so the success registers, then dismiss.
+      setTimeout(() => {
+        backdropOpacity.value = withTiming(0, { duration: 240, easing: Easing.out(Easing.cubic) });
         setTimeout(() => {
-          backdropOpacity.value = withTiming(0, { duration: 280 });
-          setTimeout(() => {
-            router.back();
-            if (isFromShare && platform) {
-              Linking.openURL(PLATFORM_SCHEMES[platform]);
-            }
-          }, 280);
-        }, 620);
-      });
+          router.back();
+          if (isFromShare && platform) {
+            Linking.openURL(PLATFORM_SCHEMES[platform]);
+          }
+        }, 220);
+      }, 560);
     } catch (err) {
       setSaving(false);
       Alert.alert('Error', 'Failed to save. Please try again.');
@@ -181,11 +216,11 @@ export default function CaptureScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Backdrop */}
+      {/* Backdrop + ambient orb (share fade so they dismiss together) */}
       <AnimatedPressable style={[styles.backdrop, backdropStyle]} onPress={dismiss} />
-
-      {/* Ambient synapse orb */}
-      <AmbientNode />
+      <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]} pointerEvents="none">
+        <AmbientNode />
+      </Animated.View>
 
       {/* Checkmark flash */}
       <CheckmarkFlash visible={showCheck} />
@@ -196,7 +231,7 @@ export default function CaptureScreen() {
         keyboardVerticalOffset={0}
         style={styles.kvWrap}
       >
-        <Animated.View style={[styles.card, collapseStyle]}>
+        <Animated.View style={[styles.card, cardStyle]}>
           {/* Header row inside card */}
           <View style={styles.cardHeader}>
             {/* Dendrite-style left accent */}
@@ -282,6 +317,20 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     top: '35%',
     zIndex: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkmarkHalo: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: colors.accent,
+    opacity: 0,
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 28,
   },
 
   // Card

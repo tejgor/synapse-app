@@ -106,8 +106,8 @@ export default function RootLayout() {
           name="capture"
           options={{
             headerShown: false,
-            presentation: 'transparentModal',
-            animation: 'fade',
+            presentation: 'containedTransparentModal',
+            animation: 'none',
           }}
         />
         <Stack.Screen
